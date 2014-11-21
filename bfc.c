@@ -130,7 +130,7 @@ typedef struct {
 void bfc_opt_init(bfc_opt_t *opt)
 {
 	memset(opt, 0, sizeof(bfc_opt_t));
-	opt->chunk_size = 10000000;
+	opt->chunk_size = 100000000;
 	opt->n_threads = 1;
 	opt->k = 33;
 	opt->n_shift = 33;
@@ -149,9 +149,6 @@ typedef struct {
 } bfc_kmer_t;
 
 static bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
-
-typedef struct {
-} bfc_hash_t;
 
 /************************
  * Blocked Bloom Filter *
@@ -191,11 +188,10 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	uint64_t *p = &b->b[y<<(BFC_BLK_SHIFT-6)];
 	int i, z = h1, cnt = 0;
 	if (!(h2&1)) h2 = (h2 + 1) & BFC_BLK_MASK;
-	for (i = z = 0; i < b->n_hashes; ++i) {
-		uint64_t *q = &p[z>>6];
-		uint64_t u = 1ULL<<(z&63);
+	for (i = 0; i < b->n_hashes; ++i) {
+		uint64_t *q = &p[z>>6], u = 1ULL<<(z&63);
 		uint64_t v = __sync_fetch_and_or(q, u);
-		if (v&u) ++cnt;
+		cnt += !!(v&u);
 		z = (z + h2) & BFC_BLK_MASK;
 	}
 	return cnt;
@@ -211,10 +207,73 @@ int bfc_bf_test(bfc_bf_t *b, uint64_t hash)
 	int i, z = h1, cnt = 0;
 	if (!(h2&1)) h2 = (h2 + 1) & BFC_BLK_MASK;
 	for (i = z = 0; i < b->n_hashes; ++i) {
-		if (p[z>>6] & 1ULL<<(z&63)) ++cnt;
+		cnt += !!(p[z>>6] & 1ULL<<(z&63));
 		z = (z + h2) & BFC_BLK_MASK;
 	}
 	return cnt;
+}
+
+/**************
+ * Hash table *
+ **************/
+
+#include "khash.h"
+
+#define _cnt_eq(a, b) ((a)>>14 == (b)>>14)
+#define _cnt_hash(a) ((a)>>14)
+
+KHASH_INIT(cnt, uint64_t, char, 0, _cnt_hash, _cnt_eq)
+typedef khash_t(cnt) cnthash_t;
+
+#define BFC_CH_KEYBITS 50
+
+typedef struct {
+	int k;
+	cnthash_t **h;
+	// private
+	int l_pre;
+} bfc_ch_t;
+
+bfc_ch_t *bfc_ch_init(int k)
+{
+	bfc_ch_t *ch;
+	int i;
+	if (k < 2) return 0;
+	ch = calloc(1, sizeof(bfc_ch_t));
+	ch->k = k;
+	ch->l_pre = k*2 - BFC_CH_KEYBITS;
+	if (ch->l_pre < 1) ch->l_pre = 1;
+	if (ch->l_pre > k - 1) ch->l_pre = k - 1;
+	ch->h = calloc(1<<ch->l_pre, sizeof(void*));
+	for (i = 0; i < 1<<ch->l_pre; ++i)
+		ch->h[i] = kh_init(cnt);
+	return ch;
+}
+
+void bfc_ch_destroy(bfc_ch_t *ch)
+{
+	int i;
+	if (ch == 0) return;
+	for (i = 0; i < 1<<ch->l_pre; ++i)
+		kh_destroy(cnt, ch->h[i]);
+	free(ch->h); free(ch);
+}
+
+void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2])
+{
+	int absent;
+	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
+	uint64_t key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
+	khint_t k;
+	while (__sync_lock_test_and_set(&h->lock, 1));
+	k = kh_put(cnt, h, key, &absent);
+	if (absent) {
+		kh_key(h, k) = key | 1;
+	} else {
+		if ((kh_key(h, k) & 0xff) != 0xff)
+			++kh_key(h, k);
+	}
+	__sync_lock_release(&h->lock);
 }
 
 typedef struct {
@@ -223,6 +282,7 @@ typedef struct {
 	int n_seqs;
 	bseq1_t *seqs;
 	bfc_bf_t *bf;
+	bfc_ch_t *ch;
 } bfc_aux_t;
 
 void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
@@ -234,6 +294,8 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
 	y[1] = hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
+	if (ret == aux->opt.n_hashes)
+		bfc_ch_insert(aux->ch, y);
 }
 
 static void worker(void *data, long k, int tid)
@@ -265,30 +327,44 @@ int main(int argc, char *argv[])
 	int i, c;
 
 	bfc_opt_init(&aux.opt);
-	while ((c = getopt(argc, argv, "k:s:")) >= 0) {
+	while ((c = getopt(argc, argv, "k:s:b:L:t:")) >= 0) {
 		if (c == 'k') aux.opt.k = atoi(optarg);
-		else if (c == 's') {
-			long x;
+		else if (c == 'b') aux.opt.n_shift = atoi(optarg);
+		else if (c == 't') aux.opt.n_threads = atoi(optarg);
+		else if (c == 'L' || c == 's') {
+			double x;
 			char *p;
-			x = strtol(optarg, &p, 10);
-			if (*p == 'G' || *p == 'g') x *= 1000000000;
-			else if (*p == 'M' || *p == 'm') x *= 1000000;
-			else if (*p == 'K' || *p == 'k') x *= 1000;
-			bfc_opt_by_size(&aux.opt, x);
+			x = strtod(optarg, &p);
+			if (*p == 'G' || *p == 'g') x *= 1e9;
+			else if (*p == 'M' || *p == 'm') x *= 1e6;
+			else if (*p == 'K' || *p == 'k') x *= 1e3;
+			if (c == 's') {
+				bfc_opt_by_size(&aux.opt, (long)x + 1);
+				fprintf(stderr, "[M::%s] set k to %d\n", __func__, aux.opt.k);
+			} else if (c == 'L') aux.opt.chunk_size = (long)x + 1;
 		}
 	}
 	aux.mask = (1ULL<<(aux.opt.k-1)) - 1;
 
 	if (optind == argc) {
-		fprintf(stderr, "Usage: bfc <in.fq>\n");
+		fprintf(stderr, "\n");
+		fprintf(stderr, "Usage:   bfc [options] <in.fq>\n\n");
+		fprintf(stderr, "Options: -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
+		fprintf(stderr, "         -k INT       k-mer length [%d]\n", aux.opt.k);
+		fprintf(stderr, "         -t INT       number of threads [%d]\n", aux.opt.n_threads);
+		fprintf(stderr, "         -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", aux.opt.n_shift);
+		fprintf(stderr, "         -h INT       use INT hash functions for Bloom Filter [%d]\n", aux.opt.n_hashes);
+		fprintf(stderr, "\n");
 		return 1;
 	}
 
 	aux.bf = bfc_bf_init(aux.opt.n_shift, aux.opt.n_hashes);
+	aux.ch = bfc_ch_init(aux.opt.k);
 
 	fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
 	seq = kseq_init(fp);
 	while ((aux.seqs = bseq_read(seq, aux.opt.chunk_size, &aux.n_seqs)) != 0) {
+		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, aux.n_seqs);
 		kt_for(aux.opt.n_threads, worker, &aux, aux.n_seqs);
 		for (i = 0; i < aux.n_seqs; ++i) {
 			free(aux.seqs[i].seq); free(aux.seqs[i].qual);
@@ -298,6 +374,7 @@ int main(int argc, char *argv[])
 	kseq_destroy(seq);
 	gzclose(fp);
 
+	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
 	return 0;
 }
