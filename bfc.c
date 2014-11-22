@@ -170,6 +170,7 @@ bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes)
 	b->n_shift = n_shift;
 	b->n_hashes = n_hashes;
 	posix_memalign((void**)&b->b, 1<<(BFC_BLK_SHIFT-3), 1ULL<<(n_shift-3));
+	bzero(b->b, 1ULL<<(n_shift-3));
 	return b;
 }
 
@@ -276,6 +277,16 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2])
 	__sync_lock_release(&h->lock);
 }
 
+uint64_t bfc_ch_count(const bfc_ch_t *ch)
+{
+	int i;
+	uint64_t cnt = 0;
+	for (i = 0; i < 1<<ch->l_pre; ++i)
+		cnt += kh_size(ch->h[i]);
+//		cnt += kh_n_buckets(ch->h[i]);
+	return cnt;
+}
+
 typedef struct {
 	bfc_opt_t opt;
 	uint64_t mask;
@@ -344,7 +355,7 @@ int main(int argc, char *argv[])
 			} else if (c == 'L') aux.opt.chunk_size = (long)x + 1;
 		}
 	}
-	aux.mask = (1ULL<<(aux.opt.k-1)) - 1;
+	aux.mask = (1ULL<<aux.opt.k) - 1;
 
 	if (optind == argc) {
 		fprintf(stderr, "\n");
@@ -374,6 +385,7 @@ int main(int argc, char *argv[])
 	kseq_destroy(seq);
 	gzclose(fp);
 
+	fprintf(stderr, "n=%lld\n", bfc_ch_count(aux.ch));
 	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
 	return 0;
