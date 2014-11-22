@@ -157,9 +157,13 @@ static bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
 #define BFC_BLK_SHIFT  9 // 64 bytes, the size of a cache line
 #define BFC_BLK_MASK   ((1<<(BFC_BLK_SHIFT)) - 1)
 
+#define BFC_BF_TYPE       uint8_t
+#define BFC_BF_TYPE_SHIFT 3
+#define BFC_BF_TYPE_MASK  ((1<<BFC_BF_TYPE_SHIFT) - 1)
+
 typedef struct {
 	int n_shift, n_hashes;
-	uint8_t *b;
+	BFC_BF_TYPE *b;
 } bfc_bf_t;
 
 bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes)
@@ -186,12 +190,12 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	uint64_t y = hash & ((1ULL<<x) - 1);
 	int h1 = hash >> x & BFC_BLK_MASK;
 	int h2 = hash >> b->n_shift & BFC_BLK_MASK;
-	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-3)];
+	BFC_BF_TYPE *p = &b->b[y<<(BFC_BLK_SHIFT-3-BFC_BF_TYPE_SHIFT)];
 	int i, z = h1, cnt = 0;
 	if (!(h2&1)) h2 = (h2 + 1) & BFC_BLK_MASK;
 	for (i = 0; i < b->n_hashes; ++i) {
-		uint8_t *q = &p[z>>3], u = 1ULL<<(z&7);
-		uint8_t v = __sync_fetch_and_or(q, u);
+		BFC_BF_TYPE *q = &p[z>>BFC_BF_TYPE_SHIFT], u = 1ULL<<(z&BFC_BF_TYPE_MASK);
+		BFC_BF_TYPE v = __sync_fetch_and_or(q, u);
 		cnt += !!(v&u);
 		z = (z + h2) & BFC_BLK_MASK;
 	}
@@ -204,11 +208,11 @@ int bfc_bf_test(bfc_bf_t *b, uint64_t hash)
 	uint64_t y = hash & ((1ULL<<x) - 1);
 	int h1 = hash >> x & BFC_BLK_MASK;
 	int h2 = hash >> b->n_shift & BFC_BLK_MASK;
-	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-3)];
+	BFC_BF_TYPE *p = &b->b[y<<(BFC_BLK_SHIFT-3-BFC_BF_TYPE_SHIFT)];
 	int i, z = h1, cnt = 0;
 	if (!(h2&1)) h2 = (h2 + 1) & BFC_BLK_MASK;
 	for (i = z = 0; i < b->n_hashes; ++i) {
-		cnt += !!(p[z>>3] & 1ULL<<(z&7));
+		cnt += !!(p[z>>BFC_BF_TYPE_SHIFT] & 1ULL<<(z&z&BFC_BF_TYPE_MASK));
 		z = (z + h2) & BFC_BLK_MASK;
 	}
 	return cnt;
