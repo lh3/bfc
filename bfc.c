@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <assert.h>
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
@@ -186,16 +187,17 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	uint64_t y = hash & ((1ULL<<x) - 1);
 	int h1 = hash >> x & BFC_BLK_MASK;
 	int h2 = hash >> b->n_shift & BFC_BLK_MASK;
-	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-6)];
+	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-3)];
 	int i, z = h1, cnt = 0;
-	while (__sync_lock_test_and_set(p, 1));
 	if (!(h2&1)) h2 = (h2 + 1) & BFC_BLK_MASK;
-	for (i = 0; i < b->n_hashes; ++i, z = (z + h2) & BFC_BLK_MASK) {
+	while (__sync_lock_test_and_set(p, 1));
+	for (i = 0; i < b->n_hashes; z = (z + h2) & BFC_BLK_MASK) {
 		uint8_t *q = &p[z>>3], u;
 		if (p == q) continue;
 		u = 1ULL<<(z&7);
 		cnt += !!(*q & u);
 		*q |= u;
+		++i;
 	}
 	__sync_lock_release(p);
 	return cnt;
@@ -364,7 +366,10 @@ int main(int argc, char *argv[])
 	seq = kseq_init(fp);
 	while ((aux.seqs = bseq_read(seq, aux.opt.chunk_size, &aux.n_seqs)) != 0) {
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, aux.n_seqs);
-		kt_for(aux.opt.n_threads, worker, &aux, aux.n_seqs);
+		if (aux.opt.n_threads == 1)
+			for (i = 0; i < aux.n_seqs; ++i)
+				worker(&aux, i, 0);
+		else kt_for(aux.opt.n_threads, worker, &aux, aux.n_seqs);
 		for (i = 0; i < aux.n_seqs; ++i) {
 			free(aux.seqs[i].seq); free(aux.seqs[i].qual);
 		}
