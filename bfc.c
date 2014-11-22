@@ -338,10 +338,11 @@ int main(int argc, char *argv[])
 	int i, c;
 
 	bfc_opt_init(&aux.opt);
-	while ((c = getopt(argc, argv, "k:s:b:L:t:")) >= 0) {
+	while ((c = getopt(argc, argv, "k:s:b:L:t:h:")) >= 0) {
 		if (c == 'k') aux.opt.k = atoi(optarg);
 		else if (c == 'b') aux.opt.n_shift = atoi(optarg);
 		else if (c == 't') aux.opt.n_threads = atoi(optarg);
+		else if (c == 'h') aux.opt.n_hashes = atoi(optarg);
 		else if (c == 'L' || c == 's') {
 			double x;
 			char *p;
