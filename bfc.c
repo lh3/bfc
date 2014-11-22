@@ -35,7 +35,7 @@ unsigned char seq_nt6_table[256] = {
  ******************/
 
 // Thomas Wang's integer hash functions. See <https://gist.github.com/lh3/59882d6b96166dfc3d8d> for a snapshot.
-uint64_t hash_64(uint64_t key, uint64_t mask)
+static inline uint64_t bfc_hash_64(uint64_t key, uint64_t mask)
 {
 	key = (~key + (key << 21)) & mask; // key = (key << 21) - key - 1;
 	key = key ^ key >> 24;
@@ -48,7 +48,7 @@ uint64_t hash_64(uint64_t key, uint64_t mask)
 }
 
 // The inversion of hash_64(). Modified from <https://naml.us/blog/tag/invertible>
-uint64_t hash_64i(uint64_t key, uint64_t mask)
+static inline uint64_t bfc_hash_64i(uint64_t key, uint64_t mask)
 {
 	uint64_t tmp;
 
@@ -305,8 +305,8 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
 	int k = aux->opt.k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
 	uint64_t mask = (1ULL<<k) - 1, y[2], hash;
-	y[0] = hash_64(x->x[t<<1|0], mask);
-	y[1] = hash_64(x->x[t<<1|1], mask);
+	y[0] = bfc_hash_64(x->x[t<<1|0], mask);
+	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
 	if (ret == aux->opt.n_hashes)
