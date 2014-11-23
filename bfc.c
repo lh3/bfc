@@ -8,29 +8,6 @@
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
-/**************
- * Base table *
- **************/
-
-unsigned char seq_nt6_table[256] = {
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
-};
-
 /******************
  * Hash functions *
  ******************/
@@ -89,6 +66,25 @@ static inline uint64_t bfc_hash_64i(uint64_t key, uint64_t mask)
 /****************
  * Sequence I/O *
  ****************/
+
+unsigned char seq_nt6_table[256] = {
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
+};
 
 typedef struct {
 	int l_seq;
@@ -201,16 +197,16 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-3)];
 	int i, z = h1, cnt = 0;
 	if ((h2&31) == 0) h2 = (h2 + 1) & BFC_BLK_MASK; // otherwise we may repeatedly use a few bits
-	while (__sync_lock_test_and_set(p, 1)); // spin lock
+	while (__sync_lock_test_and_set(p, 1)); // lock
 	for (i = 0; i < b->n_hashes; z = (z + h2) & BFC_BLK_MASK) {
 		uint8_t *q = &p[z>>3], u;
-		if (p == q) continue;
+		if (p == q) continue; // don't use the first byte. It is a spin lock.
 		u = 1ULL<<(z&7);
 		cnt += !!(*q & u);
 		*q |= u;
 		++i;
 	}
-	__sync_lock_release(p);
+	__sync_lock_release(p); // unlock
 	return cnt;
 }
 
@@ -222,7 +218,6 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 
 #define _cnt_eq(a, b) ((a)>>14 == (b)>>14)
 #define _cnt_hash(a) ((a)>>14)
-
 KHASH_INIT(cnt, uint64_t, char, 0, _cnt_hash, _cnt_eq)
 typedef khash_t(cnt) cnthash_t;
 
@@ -244,7 +239,7 @@ bfc_ch_t *bfc_ch_init(int k)
 	if (k < 2) return 0;
 	ch = calloc(1, sizeof(bfc_ch_t));
 	ch->k = k;
-	ch->l_pre = k*2 - BFC_CH_KEYBITS;
+	ch->l_pre = k*2 - BFC_CH_KEYBITS; // TODO: this should be improved!!!
 	if (ch->l_pre < 1) ch->l_pre = 1;
 	if (ch->l_pre > k - 1) ch->l_pre = k - 1;
 	ch->h = calloc(1<<ch->l_pre, sizeof(void*));
@@ -268,15 +263,11 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2])
 	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
 	uint64_t key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
 	khint_t k;
-	while (__sync_lock_test_and_set(&h->lock, 1));
+	while (__sync_lock_test_and_set(&h->lock, 1)); // lock
 	k = kh_put(cnt, h, key, &absent);
-	if (absent) {
-		kh_key(h, k) = key | 1;
-	} else {
-		if ((kh_key(h, k) & 0xff) != 0xff)
-			++kh_key(h, k);
-	}
-	__sync_lock_release(&h->lock);
+	if (!absent && (kh_key(h, k) & 0xff) != 0xff)
+		++kh_key(h, k);
+	__sync_lock_release(&h->lock); // unlock
 }
 
 uint64_t bfc_ch_count(const bfc_ch_t *ch)
