@@ -203,6 +203,14 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	return cnt;
 }
 
+uint64_t bfc_bf_digest(const bfc_bf_t *b) // for debugging
+{
+	uint64_t digest = 0, i, *p = (uint64_t*)b->b;
+	for (i = 0; i < 1ULL << (b->n_shift - 6); ++i)
+		digest ^= bfc_hash_64(p[i], (uint64_t)-1);
+	return digest;
+}
+
 /**************
  * Hash table *
  **************/
@@ -216,6 +224,8 @@ KHASH_INIT(cnt, uint64_t, char, 0, _cnt_hash, _cnt_eq)
 typedef khash_t(cnt) cnthash_t;
 
 #define BFC_CH_KEYBITS 50
+
+uint64_t bfc_ch_lock_cnt = 0;
 
 typedef struct {
 	int k;
@@ -272,9 +282,11 @@ uint64_t bfc_ch_count(const bfc_ch_t *ch)
 	uint64_t cnt = 0;
 	for (i = 0; i < 1<<ch->l_pre; ++i)
 		cnt += kh_size(ch->h[i]);
-//		cnt += kh_n_buckets(ch->h[i]);
 	return cnt;
 }
+
+/**********************
+ **********************/
 
 typedef struct {
 	bfc_opt_t opt;
@@ -294,8 +306,9 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
 	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
-	if (ret == aux->opt.n_hashes)
+	if (ret == aux->opt.n_hashes) {
 		bfc_ch_insert(aux->ch, y);
+	}
 }
 
 static void worker(void *data, long k, int tid)
@@ -379,6 +392,7 @@ int main(int argc, char *argv[])
 	gzclose(fp);
 
 	fprintf(stderr, "[M::%s] number of high-occurrence k-mers in the hash table: %ld\n", __func__, (long)bfc_ch_count(aux.ch));
+	fprintf(stderr, "digest=%lx\n", (unsigned long)bfc_bf_digest(aux.bf));
 	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
 	return 0;
