@@ -1,12 +1,8 @@
-#include <zlib.h>
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <assert.h>
-#include "kseq.h"
-KSEQ_INIT(gzFile, gzread)
 
 /******************
  * Hash functions *
@@ -67,6 +63,10 @@ static inline uint64_t bfc_hash_64i(uint64_t key, uint64_t mask)
  * Sequence I/O *
  ****************/
 
+#include <zlib.h>
+#include "kseq.h"
+KSEQ_INIT(gzFile, gzread)
+
 unsigned char seq_nt6_table[256] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -113,9 +113,33 @@ bseq1_t *bseq_read(kseq_t *ks, int chunk_size, int *n_)
 	return seqs;
 }
 
+/**********
+ * Timers *
+ **********/
+
+#include <sys/resource.h>
+#include <sys/time.h>
+
+double cputime()
+{
+	struct rusage r;
+	getrusage(RUSAGE_SELF, &r);
+	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
+}
+
+double realtime()
+{
+	struct timeval tp;
+	struct timezone tzp;
+	gettimeofday(&tp, &tzp);
+	return tp.tv_sec + tp.tv_usec * 1e-6;
+}
+
 /*****************
  * Configuration *
  *****************/
+
+#include <math.h>
 
 typedef struct {
 	int chunk_size;
@@ -330,7 +354,9 @@ int main(int argc, char *argv[])
 	gzFile fp;
 	bfc_aux_t aux;
 	int i, c;
+	double t_real;
 
+	t_real = realtime();
 	bfc_opt_init(&aux.opt);
 	while ((c = getopt(argc, argv, "k:s:b:L:t:h:")) >= 0) {
 		if (c == 'k') aux.opt.k = atoi(optarg);
@@ -370,7 +396,8 @@ int main(int argc, char *argv[])
 	fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
 	seq = kseq_init(fp);
 	while ((aux.seqs = bseq_read(seq, aux.opt.chunk_size, &aux.n_seqs)) != 0) {
-		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, aux.n_seqs);
+		double rt, ct;
+		rt = realtime(); ct = cputime();
 		if (aux.opt.n_threads == 1)
 			for (i = 0; i < aux.n_seqs; ++i)
 				worker(&aux, i, 0);
@@ -379,12 +406,18 @@ int main(int argc, char *argv[])
 			free(aux.seqs[i].seq); free(aux.seqs[i].qual);
 		}
 		free(aux.seqs);
+		fprintf(stderr, "[M::%s] processed %d sequences in %.3f sec (%.1f%% CPU); # k-mers stored: %ld\n",
+				__func__, aux.n_seqs, realtime() - rt, 100. * (cputime() - ct) / (realtime() - rt), (long)bfc_ch_count(aux.ch));
 	}
 	kseq_destroy(seq);
 	gzclose(fp);
 
-	fprintf(stderr, "[M::%s] number of high-occurrence k-mers in the hash table: %ld\n", __func__, (long)bfc_ch_count(aux.ch));
 	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
+
+	fprintf(stderr, "[M::%s] CMD:", __func__);
+	for (i = 0; i < argc; ++i)
+		fprintf(stderr, " %s", argv[i]);
+	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - t_real, cputime());
 	return 0;
 }
