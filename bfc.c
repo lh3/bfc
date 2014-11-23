@@ -189,8 +189,8 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	int h2 = hash >> b->n_shift & BFC_BLK_MASK;
 	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-3)];
 	int i, z = h1, cnt = 0;
-	if (!(h2&1)) h2 = (h2 + 1) & BFC_BLK_MASK;
-	while (__sync_lock_test_and_set(p, 1));
+	if ((h2&31) == 0) h2 = (h2 + 1) & BFC_BLK_MASK; // otherwise we may repeatedly use a few bits
+	while (__sync_lock_test_and_set(p, 1)); // spin lock
 	for (i = 0; i < b->n_hashes; z = (z + h2) & BFC_BLK_MASK) {
 		uint8_t *q = &p[z>>3], u;
 		if (p == q) continue;
@@ -378,7 +378,7 @@ int main(int argc, char *argv[])
 	kseq_destroy(seq);
 	gzclose(fp);
 
-	fprintf(stderr, "n=%lld\n", bfc_ch_count(aux.ch));
+	fprintf(stderr, "[M::%s] number of high-occurrence k-mers in the hash table: %ld\n", __func__, (long)bfc_ch_count(aux.ch));
 	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
 	return 0;
