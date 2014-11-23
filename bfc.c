@@ -287,7 +287,9 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2])
 	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
 	uint64_t key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
 	khint_t k;
-	while (__sync_lock_test_and_set(&h->lock, 1)); // lock
+	if (__sync_lock_test_and_set(&h->lock, 1))
+		while (__sync_lock_test_and_set(&h->lock, 1))
+			while (h->lock); // lock
 	k = kh_put(cnt, h, key, &absent);
 	if (!absent && (kh_key(h, k) & 0xff) != 0xff)
 		++kh_key(h, k);
