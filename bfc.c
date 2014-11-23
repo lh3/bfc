@@ -151,6 +151,17 @@ typedef struct {
 
 static bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
 
+/* A note on multi-threading
+
+   The bloom filter is always the same regardless of how many threads in use.
+   However, the k-mer inserted to the hash table may be slightly different.
+   Suppose k-mers A and B are both singletons and that if A is inserted first,
+   B is a false positive and gets inserted to the hash table. In the
+   multi-threading mode, nonetheless, B may be inserted before A. In this case,
+   B is not a false positive any more. This is not a bug. The k-mers put into
+   the hash table depends on the order of input.
+*/
+
 /************************
  * Blocked Bloom Filter *
  ************************/
@@ -201,14 +212,6 @@ int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
 	}
 	__sync_lock_release(p);
 	return cnt;
-}
-
-uint64_t bfc_bf_digest(const bfc_bf_t *b) // for debugging
-{
-	uint64_t digest = 0, i, *p = (uint64_t*)b->b;
-	for (i = 0; i < 1ULL << (b->n_shift - 6); ++i)
-		digest ^= bfc_hash_64(p[i], (uint64_t)-1);
-	return digest;
 }
 
 /**************
@@ -306,9 +309,7 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
 	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
-	if (ret == aux->opt.n_hashes) {
-		bfc_ch_insert(aux->ch, y);
-	}
+	if (ret == aux->opt.n_hashes) bfc_ch_insert(aux->ch, y);
 }
 
 static void worker(void *data, long k, int tid)
@@ -392,7 +393,6 @@ int main(int argc, char *argv[])
 	gzclose(fp);
 
 	fprintf(stderr, "[M::%s] number of high-occurrence k-mers in the hash table: %ld\n", __func__, (long)bfc_ch_count(aux.ch));
-	fprintf(stderr, "digest=%lx\n", (unsigned long)bfc_bf_digest(aux.bf));
 	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
 	return 0;
