@@ -144,7 +144,7 @@ double realtime()
 typedef struct {
 	int chunk_size;
 	int n_threads;
-	int k;
+	int k, q;
 	int n_shift, n_hashes;
 } bfc_opt_t;
 
@@ -154,6 +154,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->chunk_size = 100000000;
 	opt->n_threads = 1;
 	opt->k = 33;
+	opt->q = 20;
 	opt->n_shift = 33;
 	opt->n_hashes = 4;
 }
@@ -281,7 +282,7 @@ void bfc_ch_destroy(bfc_ch_t *ch)
 	free(ch->h); free(ch);
 }
 
-void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2])
+void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int low_flag)
 {
 	int absent;
 	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
@@ -291,8 +292,14 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2])
 		while (__sync_lock_test_and_set(&h->lock, 1))
 			while (h->lock); // lock
 	k = kh_put(cnt, h, key, &absent);
-	if (!absent && (kh_key(h, k) & 0xff) != 0xff)
-		++kh_key(h, k);
+	if (absent) {
+		if (low_flag & 1) kh_key(h, k) |= 1<<8;
+		if (low_flag & 2) kh_key(h, k) |= 1<<11;
+	} else {
+		if ((kh_key(h, k) & 0xff) != 0xff) ++kh_key(h, k);
+		if ((low_flag & 1) && (kh_key(h, k) >> 8 & 7) != 7) kh_key(h, k) += 1<<8;
+		if ((low_flag & 2) && (kh_key(h, k) >> 11& 7) != 7) kh_key(h, k) += 1<<11;
+	}
 	__sync_lock_release(&h->lock); // unlock
 }
 
@@ -317,7 +324,7 @@ typedef struct {
 	bfc_ch_t *ch;
 } bfc_aux_t;
 
-void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
+void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x, int low_flag)
 {
 	int k = aux->opt.k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
@@ -326,7 +333,9 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x)
 	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
-	if (ret == aux->opt.n_hashes) bfc_ch_insert(aux->ch, y);
+	if (t) low_flag = (low_flag&1)<<1 | (low_flag&2)>>1;
+	if (ret == aux->opt.n_hashes)
+		bfc_ch_insert(aux->ch, y, low_flag);
 }
 
 static void worker(void *data, long k, int tid)
@@ -343,7 +352,14 @@ static void worker(void *data, long k, int tid)
 			x.x[1] = (x.x[1]<<1 | (c>>1)) & aux->mask;
 			x.x[2] = x.x[2]>>1 | (1ULL^(c&1))<<(o->k-1);
 			x.x[3] = x.x[3]>>1 | (1ULL^c>>1) <<(o->k-1);
-			if (++l >= o->k) bfc_kmer_insert(aux, &x);
+			if (++l >= o->k) {
+				int low_flag = 0;
+				if (s->qual) {
+					if (s->qual[i] - 33 < o->q) low_flag |= 1;
+					if (s->qual[i - o->k + 1] - 33 < o->q) low_flag |= 2;
+				}
+				bfc_kmer_insert(aux, &x, low_flag);
+			}
 		} else l = 0, x = bfc_kmer_null;
 	}
 }
@@ -360,8 +376,9 @@ int main(int argc, char *argv[])
 
 	t_real = realtime();
 	bfc_opt_init(&aux.opt);
-	while ((c = getopt(argc, argv, "k:s:b:L:t:h:")) >= 0) {
+	while ((c = getopt(argc, argv, "k:s:b:L:t:h:q:")) >= 0) {
 		if (c == 'k') aux.opt.k = atoi(optarg);
+		else if (c == 'q') aux.opt.q = atoi(optarg);
 		else if (c == 'b') aux.opt.n_shift = atoi(optarg);
 		else if (c == 't') aux.opt.n_threads = atoi(optarg);
 		else if (c == 'h') aux.opt.n_hashes = atoi(optarg);

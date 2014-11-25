@@ -63,27 +63,27 @@ void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
  * kt_pipeline() *
  *****************/
 
-struct __kt_pw_s;
+struct ktp_t;
 
 typedef struct {
+	struct ktp_t *pl;
+	int step;
+	void *data;
+} ktp_worker_t;
+
+typedef struct ktp_t {
 	void *shared;
 	void *(*func)(void*, int, void**);
 	int n_workers, n_steps;
-	struct __kt_pw_s *workers;
+	ktp_worker_t *workers;
 	pthread_mutex_t mutex;
 	pthread_cond_t cv;
-} kt_pl_t;
-
-typedef struct __kt_pw_s {
-	kt_pl_t *pl;
-	int step;
-	void *data;
-} kt_pw_t;
+} ktp_t;
 
 static void *ktp_worker(void *data)
 {
-	kt_pw_t *w = (kt_pw_t*)data;
-	kt_pl_t *p = w->pl;
+	ktp_worker_t *w = (ktp_worker_t*)data;
+	ktp_t *p = w->pl;
 	while (w->step < p->n_steps) {
 		// test whether we can kick off the job with this worker
 		pthread_mutex_lock(&p->mutex);
@@ -106,7 +106,7 @@ static void *ktp_worker(void *data)
 		// update step and let other workers know
 		pthread_mutex_lock(&p->mutex);
 		w->step = data? (w->step + 1) % p->n_steps : p->n_steps;
-		pthread_mutex_broadcast(&p->cv);
+		pthread_cond_broadcast(&p->cv);
 		pthread_mutex_unlock(&p->mutex);
 	}
 	pthread_exit(0);
@@ -114,9 +114,8 @@ static void *ktp_worker(void *data)
 
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void**), void *shared_data, int n_steps)
 {
-	kt_pl_t aux;
+	ktp_t aux;
 	int i;
-	kt_worker_t *w;
 
 	if (n_threads < 1) n_threads = 1;
 	aux.n_workers = n_threads;
@@ -126,19 +125,19 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void**), void *shared_
 	pthread_mutex_init(&aux.mutex, 0);
 	pthread_cond_init(&aux.cv, 0);
 
-	aux.workers = alloca(n_threads * sizeof(kt_pw_t));
+	aux.workers = alloca(n_threads * sizeof(ktp_worker_t));
 	for (i = 0; i < n_threads; ++i) {
-		kt_pw_t *w = &aux.workers[i];
+		ktp_worker_t *w = &aux.workers[i];
 		w->step = 0; w->pl = &aux; w->data = 0;
 	}
 
 	if (n_threads > 1) {
 		pthread_t *tid;
 		tid = alloca(n_threads * sizeof(pthread_t));
-		for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktp_worker, &aux.w[i]);
+		for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktp_worker, &aux.workers[i]);
 		for (i = 0; i < n_threads; ++i) pthread_join(tid[i], 0);
 	} else {
-		kt_pw_t *w = &aux.workers[0];
+		ktp_worker_t *w = &aux.workers[0];
 		for (i = 0; i < n_steps; ++i)
 			w->data = aux.func(shared_data, i, i? w->data : 0);
 	}
