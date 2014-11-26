@@ -315,6 +315,8 @@ uint64_t bfc_ch_count(const bfc_ch_t *ch)
 /**********************
  **********************/
 
+static double bfc_real_time;
+
 typedef struct {
 	bfc_opt_t opt;
 	uint64_t mask;
@@ -388,7 +390,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 		int i;
 		bfc_count_data_t *data = (bfc_count_data_t*)_data;
 		kt_for(aux->opt.n_threads, worker, data, data->n_seqs);
-		fprintf(stderr, "[M::%s] processed %d sequences\n", __func__, data->n_seqs);
+		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs)\n", __func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
 		for (i = 0; i < data->n_seqs; ++i) {
 			free(data->seqs[i].seq); free(data->seqs[i].qual);
 		}
@@ -402,9 +404,8 @@ int main(int argc, char *argv[])
 	gzFile fp;
 	bfc_aux_t aux;
 	int i, c, no_mt_io = 0;
-	double t_real;
 
-	t_real = realtime();
+	bfc_real_time = realtime();
 	bfc_opt_init(&aux.opt);
 	while ((c = getopt(argc, argv, "k:s:b:L:t:h:q:J")) >= 0) {
 		if (c == 'k') aux.opt.k = atoi(optarg);
@@ -455,6 +456,6 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "[M::%s] CMD:", __func__);
 	for (i = 0; i < argc; ++i)
 		fprintf(stderr, " %s", argv[i]);
-	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - t_real, cputime());
+	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - bfc_real_time, cputime());
 	return 0;
 }
