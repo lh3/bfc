@@ -318,11 +318,16 @@ uint64_t bfc_ch_count(const bfc_ch_t *ch)
 typedef struct {
 	bfc_opt_t opt;
 	uint64_t mask;
-	int n_seqs;
-	bseq1_t *seqs;
+	kseq_t *ks;
 	bfc_bf_t *bf;
 	bfc_ch_t *ch;
 } bfc_aux_t;
+
+typedef struct {
+	int n_seqs;
+	bseq1_t *seqs;
+	bfc_aux_t *aux;
+} bfc_count_data_t;
 
 void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x, int low_flag)
 {
@@ -338,10 +343,11 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x, int low_flag)
 		bfc_ch_insert(aux->ch, y, low_flag);
 }
 
-static void worker(void *data, long k, int tid)
+static void worker(void *_data, long k, int tid)
 {
-	bfc_aux_t *aux = (bfc_aux_t*)data;
-	bseq1_t *s = &aux->seqs[k];
+	bfc_count_data_t *data = (bfc_count_data_t*)_data;
+	bfc_aux_t *aux = data->aux;
+	bseq1_t *s = &data->seqs[k];
 	const bfc_opt_t *o = &aux->opt;
 	int i, l;
 	bfc_kmer_t x = bfc_kmer_null;
@@ -365,23 +371,48 @@ static void worker(void *data, long k, int tid)
 }
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
+void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+
+void *bfc_count_cb(void *shared, int step, void *_data)
+{
+	bfc_aux_t *aux = (bfc_aux_t*)shared;
+	if (step == 0) {
+		bfc_count_data_t *ret;
+		ret = calloc(1, sizeof(bfc_count_data_t));
+		ret->seqs = bseq_read(aux->ks, aux->opt.chunk_size, &ret->n_seqs);
+		ret->aux = aux;
+		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
+		if (ret->seqs) return ret;
+		else free(ret);
+	} else if (step == 1) {
+		int i;
+		bfc_count_data_t *data = (bfc_count_data_t*)_data;
+		kt_for(aux->opt.n_threads, worker, data, data->n_seqs);
+		fprintf(stderr, "[M::%s] processed %d sequences\n", __func__, data->n_seqs);
+		for (i = 0; i < data->n_seqs; ++i) {
+			free(data->seqs[i].seq); free(data->seqs[i].qual);
+		}
+		free(data->seqs); free(data);
+	}
+	return 0;
+}
 
 int main(int argc, char *argv[])
 {
-	kseq_t *seq;
 	gzFile fp;
 	bfc_aux_t aux;
-	int i, c;
+	int i, c, no_mt_io = 0;
 	double t_real;
 
 	t_real = realtime();
 	bfc_opt_init(&aux.opt);
-	while ((c = getopt(argc, argv, "k:s:b:L:t:h:q:")) >= 0) {
+	while ((c = getopt(argc, argv, "k:s:b:L:t:h:q:J")) >= 0) {
 		if (c == 'k') aux.opt.k = atoi(optarg);
 		else if (c == 'q') aux.opt.q = atoi(optarg);
 		else if (c == 'b') aux.opt.n_shift = atoi(optarg);
 		else if (c == 't') aux.opt.n_threads = atoi(optarg);
 		else if (c == 'h') aux.opt.n_hashes = atoi(optarg);
+		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'L' || c == 's') {
 			double x;
 			char *p;
@@ -413,22 +444,9 @@ int main(int argc, char *argv[])
 	aux.ch = bfc_ch_init(aux.opt.k);
 
 	fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
-	seq = kseq_init(fp);
-	while ((aux.seqs = bseq_read(seq, aux.opt.chunk_size, &aux.n_seqs)) != 0) {
-		double rt, ct;
-		rt = realtime(); ct = cputime();
-		if (aux.opt.n_threads == 1)
-			for (i = 0; i < aux.n_seqs; ++i)
-				worker(&aux, i, 0);
-		else kt_for(aux.opt.n_threads, worker, &aux, aux.n_seqs);
-		for (i = 0; i < aux.n_seqs; ++i) {
-			free(aux.seqs[i].seq); free(aux.seqs[i].qual);
-		}
-		free(aux.seqs);
-		fprintf(stderr, "[M::%s] processed %d sequences in %.3f sec (%.1f%% CPU); # k-mers stored: %ld\n",
-				__func__, aux.n_seqs, realtime() - rt, 100. * (cputime() - ct) / (realtime() - rt), (long)bfc_ch_count(aux.ch));
-	}
-	kseq_destroy(seq);
+	aux.ks = kseq_init(fp);
+	kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &aux, 2);
+	kseq_destroy(aux.ks);
 	gzclose(fp);
 
 	bfc_ch_destroy(aux.ch);
