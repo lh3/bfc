@@ -414,8 +414,9 @@ void bfc_ch_print_kcov(const bfc_ch_t *ch, const char *seq)
 	}
 }
 
-/**********************
- **********************/
+/*******************************
+ * Other routines for counting *
+ *******************************/
 
 static double bfc_real_time;
 
@@ -425,15 +426,15 @@ typedef struct {
 	kseq_t *ks;
 	bfc_bf_t *bf;
 	bfc_ch_t *ch;
-} bfc_aux_t;
+} bfc_cnt_t;
 
 typedef struct {
 	int n_seqs;
 	bseq1_t *seqs;
-	bfc_aux_t *aux;
+	bfc_cnt_t *aux;
 } bfc_count_data_t;
 
-void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x, int low_flag)
+void bfc_kmer_insert(bfc_cnt_t *aux, const bfc_kmer_t *x, int low_flag)
 {
 	int k = aux->opt.k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
@@ -447,10 +448,10 @@ void bfc_kmer_insert(bfc_aux_t *aux, const bfc_kmer_t *x, int low_flag)
 		bfc_ch_insert(aux->ch, y, low_flag);
 }
 
-static void worker(void *_data, long k, int tid)
+static void worker_count(void *_data, long k, int tid)
 {
 	bfc_count_data_t *data = (bfc_count_data_t*)_data;
-	bfc_aux_t *aux = data->aux;
+	bfc_cnt_t *aux = data->aux;
 	bseq1_t *s = &data->seqs[k];
 	const bfc_opt_t *o = &aux->opt;
 	int i, l;
@@ -479,7 +480,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 void *bfc_count_cb(void *shared, int step, void *_data)
 {
-	bfc_aux_t *aux = (bfc_aux_t*)shared;
+	bfc_cnt_t *aux = (bfc_cnt_t*)shared;
 	if (step == 0) {
 		bfc_count_data_t *ret;
 		ret = calloc(1, sizeof(bfc_count_data_t));
@@ -491,7 +492,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 	} else if (step == 1) {
 		int i;
 		bfc_count_data_t *data = (bfc_count_data_t*)_data;
-		kt_for(aux->opt.n_threads, worker, data, data->n_seqs);
+		kt_for(aux->opt.n_threads, worker_count, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs; # distinct k-mers: %ld)\n",
 				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time, (long)bfc_ch_count(aux->ch));
 		for (i = 0; i < data->n_seqs; ++i) {
@@ -505,7 +506,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 int main(int argc, char *argv[])
 {
 	gzFile fp;
-	bfc_aux_t aux;
+	bfc_cnt_t aux;
 	int i, c, no_mt_io = 0;
 	char *in_hash = 0, *out_hash = 0, *str_kcov = 0;
 
