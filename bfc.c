@@ -248,7 +248,7 @@ typedef khash_t(cnt) cnthash_t;
 
 #define BFC_CH_KEYBITS 50
 
-uint64_t bfc_ch_lock_cnt = 0;
+#define bfc_flip_cnt(r) (((r) & 0xff) | ((r)>>8&7)<<11 | ((r)>>11&7)<<8)
 
 typedef struct {
 	int k;
@@ -303,23 +303,15 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int low_flag)
 	__sync_lock_release(&h->lock); // unlock
 }
 
-int bfc_ch_get(const bfc_ch_t *ch, const bfc_kmer_t *z)
+int bfc_ch_get(const bfc_ch_t *ch, const uint64_t x[2])
 {
-	int k = ch->k, ret = -1, t = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
-	uint64_t mask = (1ULL<<k) - 1, x[2], key;
+	uint64_t key;
 	cnthash_t *h;
 	khint_t itr;
-
-	x[0] = bfc_hash_64(z->x[t<<1|0], mask);
-	x[1] = bfc_hash_64(z->x[t<<1|1], mask);
 	h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
 	key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
 	itr = kh_get(cnt, h, key);
-	if (itr != kh_end(h)) {
-		ret = kh_key(h, itr) & 0x3fff;
-		if (!t) ret = (ret & 0xff) | (ret>>8&7)<<11 | (ret>>11&7)<<8;
-	}
-	return ret;
+	return itr == kh_end(h)? -1 : kh_key(h, itr) & 0x3fff;
 }
 
 uint64_t bfc_ch_count(const bfc_ch_t *ch)
@@ -380,19 +372,45 @@ bfc_ch_t *bfc_ch_restore(const char *fn)
 	return ch;
 }
 
-void _bfc_ch_print(const bfc_ch_t *ch)
+/**************
+ * Cache hash *
+ **************/
+
+typedef struct {
+	uint64_t h0:56, ch:8;
+	uint64_t h1:56, cl:6, absent:2;
+} bfc_kcelem_t;
+
+#define kc_hash(a) ((a).h0 + (a).h1)
+#define kc_equal(a, b) ((a).h0 == (b).h0 && (a).h1 == (b).h1)
+KHASH_INIT(kc, bfc_kcelem_t, char, 0, kc_hash, kc_equal)
+typedef khash_t(kc) kchash_t;
+
+int bfc_kc_get(const bfc_ch_t *ch, kchash_t *kc, const bfc_kmer_t *z)
 {
-	int i;
-	for (i = 0; i < 1<<ch->l_pre; ++i) {
-		cnthash_t *h = ch->h[i];
+	int r, flipped = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
+	uint64_t x[2], mask = (1ULL<<ch->k) - 1;
+	x[0] = bfc_hash_64(z->x[flipped<<1|0], mask);
+	x[1] = bfc_hash_64(z->x[flipped<<1|1], mask);
+	if (kc) {
 		khint_t k;
-		for (k = 0; k < kh_end(h); ++k)
-			if (kh_exist(h, k))
-				printf("%d\t%d\t%d\n", (int)(kh_key(h, k)&0xff), (int)(kh_key(h,k)>>8&7), (int)(kh_key(h,k)>>11&7));
-	}
+		int absent;
+		bfc_kcelem_t key, *p;
+		key.h0 = x[0], key.h1 = x[1];
+		k = kh_put(kc, kc, key, &absent);
+		p = &kh_key(kc, k);
+		if (absent) {
+			r = bfc_ch_get(ch, x);
+			if (r >= 0) p->ch = r&0xff, p->cl = r>>8&0x3f, p->absent = 0;
+			else p->ch = p->cl = 0, p->absent = 1;
+		} else r = p->absent? -1 : p->cl<<8 | p->ch;
+	} else r = bfc_ch_get(ch, x);
+	if (r >= 0 && flipped)
+		r = (r & 0xff) | (r>>8&7)<<11 | (r>>11&7)<<8;
+	return r;
 }
 
-void bfc_ch_print_kcov(const bfc_ch_t *ch, const char *seq)
+void bfc_kc_print_kcov(const bfc_ch_t *ch, const char *seq)
 {
 	int len, i, l;
 	uint64_t mask = (1ULL<<ch->k) - 1;
@@ -406,9 +424,8 @@ void bfc_ch_print_kcov(const bfc_ch_t *ch, const char *seq)
 			x.x[2] = x.x[2]>>1 | (1ULL^(c&1))<<(ch->k-1);
 			x.x[3] = x.x[3]>>1 | (1ULL^c>>1) <<(ch->k-1);
 			if (++l >= ch->k) {
-				int r;
-				r = bfc_ch_get(ch, &x);
-				if (r >= 0) fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>8&7, r>>11&7);
+				int r = bfc_kc_get(ch, 0, &x);
+				if (r >= 0) fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>11&7, r>>8&7);
 			}
 		} else l = 0, x = bfc_kmer_null;
 	}
@@ -426,15 +443,15 @@ typedef struct {
 	kseq_t *ks;
 	bfc_bf_t *bf;
 	bfc_ch_t *ch;
-} bfc_cnt_t;
+} bfc_cntaux_t;
 
 typedef struct {
 	int n_seqs;
 	bseq1_t *seqs;
-	bfc_cnt_t *aux;
+	bfc_cntaux_t *aux;
 } bfc_count_data_t;
 
-void bfc_kmer_insert(bfc_cnt_t *aux, const bfc_kmer_t *x, int low_flag)
+void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int low_flag)
 {
 	int k = aux->opt.k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
@@ -451,7 +468,7 @@ void bfc_kmer_insert(bfc_cnt_t *aux, const bfc_kmer_t *x, int low_flag)
 static void worker_count(void *_data, long k, int tid)
 {
 	bfc_count_data_t *data = (bfc_count_data_t*)_data;
-	bfc_cnt_t *aux = data->aux;
+	bfc_cntaux_t *aux = data->aux;
 	bseq1_t *s = &data->seqs[k];
 	const bfc_opt_t *o = &aux->opt;
 	int i, l;
@@ -480,7 +497,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 void *bfc_count_cb(void *shared, int step, void *_data)
 {
-	bfc_cnt_t *aux = (bfc_cnt_t*)shared;
+	bfc_cntaux_t *aux = (bfc_cntaux_t*)shared;
 	if (step == 0) {
 		bfc_count_data_t *ret;
 		ret = calloc(1, sizeof(bfc_count_data_t));
@@ -503,10 +520,26 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 	return 0;
 }
 
+/********************
+ * Correct one read *
+ ********************/
+
+typedef struct {
+	const bfc_ch_t *ch;
+} bfc_ec1_t;
+
+/********************
+ * Error correction *
+ ********************/
+
+/**************
+ * Main entry *
+ **************/
+
 int main(int argc, char *argv[])
 {
 	gzFile fp;
-	bfc_cnt_t aux;
+	bfc_cntaux_t aux;
 	int i, c, no_mt_io = 0;
 	char *in_hash = 0, *out_hash = 0, *str_kcov = 0;
 
@@ -565,7 +598,7 @@ int main(int argc, char *argv[])
 		aux.bf = 0;
 	} else aux.ch = bfc_ch_restore(in_hash);
 
-	if (str_kcov) bfc_ch_print_kcov(aux.ch, str_kcov);
+	if (str_kcov) bfc_kc_print_kcov(aux.ch, str_kcov);
 	if (out_hash) bfc_ch_dump(aux.ch, out_hash);
 	bfc_ch_destroy(aux.ch);
 	bfc_bf_destroy(aux.bf);
