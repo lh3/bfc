@@ -305,7 +305,7 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int low_flag)
 
 int bfc_ch_get(const bfc_ch_t *ch, const bfc_kmer_t *z)
 {
-	int k = ch->k, t = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
+	int k = ch->k, ret = -1, t = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
 	uint64_t mask = (1ULL<<k) - 1, x[2], key;
 	cnthash_t *h;
 	khint_t itr;
@@ -315,7 +315,11 @@ int bfc_ch_get(const bfc_ch_t *ch, const bfc_kmer_t *z)
 	h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
 	key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
 	itr = kh_get(cnt, h, key);
-	return itr != kh_end(h)? kh_key(h, itr) & 0x3fff : -1;
+	if (itr != kh_end(h)) {
+		ret = kh_key(h, itr) & 0x3fff;
+		if (!t) ret = (ret & 0xff) | (ret>>8&7)<<11 | (ret>>11&7)<<8;
+	}
+	return ret;
 }
 
 uint64_t bfc_ch_count(const bfc_ch_t *ch)
@@ -394,7 +398,6 @@ void bfc_ch_print_kcov(const bfc_ch_t *ch, const char *seq)
 	uint64_t mask = (1ULL<<ch->k) - 1;
 	len = strlen(seq);
 	bfc_kmer_t x = bfc_kmer_null;
-	printf("%d\n", len);
 	for (i = l = 0; i < len; ++i) {
 		int c = seq_nt6_table[(uint8_t)seq[i]] - 1;
 		if (c < 4) {
