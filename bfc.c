@@ -146,6 +146,7 @@ typedef struct {
 	int n_threads;
 	int k, q;
 	int n_shift, n_hashes;
+	int min_cov;
 } bfc_opt_t;
 
 void bfc_opt_init(bfc_opt_t *opt)
@@ -157,6 +158,8 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->q = 20;
 	opt->n_shift = 33;
 	opt->n_hashes = 4;
+
+	opt->min_cov = 3;
 }
 
 void bfc_opt_by_size(bfc_opt_t *opt, long size)
@@ -166,11 +169,24 @@ void bfc_opt_by_size(bfc_opt_t *opt, long size)
 	opt->n_shift = opt->k;
 }
 
+/**********************
+ * Basic k-mer update *
+ **********************/
+
 typedef struct {
 	uint64_t x[4];
 } bfc_kmer_t;
 
 static bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
+
+static inline void bfc_kmer_append(int k, uint64_t x[4], int c)
+{ // IMPORTANT: 0 <= c < 4
+	uint64_t mask = (1ULL<<k) - 1;
+	x[0] = (x[0]<<1 | (c&1))  & mask;
+	x[1] = (x[1]<<1 | (c>>1)) & mask;
+	x[2] = x[2]>>1 | (1ULL^(c&1))<<(k-1);
+	x[3] = x[3]>>1 | (1ULL^c>>1) <<(k-1);
+}
 
 /* A note on multi-threading
 
@@ -413,16 +429,12 @@ int bfc_kc_get(const bfc_ch_t *ch, kchash_t *kc, const bfc_kmer_t *z)
 void bfc_kc_print_kcov(const bfc_ch_t *ch, const char *seq)
 {
 	int len, i, l;
-	uint64_t mask = (1ULL<<ch->k) - 1;
 	len = strlen(seq);
 	bfc_kmer_t x = bfc_kmer_null;
 	for (i = l = 0; i < len; ++i) {
 		int c = seq_nt6_table[(uint8_t)seq[i]] - 1;
 		if (c < 4) {
-			x.x[0] = (x.x[0]<<1 | (c&1))  & mask;
-			x.x[1] = (x.x[1]<<1 | (c>>1)) & mask;
-			x.x[2] = x.x[2]>>1 | (1ULL^(c&1))<<(ch->k-1);
-			x.x[3] = x.x[3]>>1 | (1ULL^c>>1) <<(ch->k-1);
+			bfc_kmer_append(ch->k, x.x, c);
 			if (++l >= ch->k) {
 				int r = bfc_kc_get(ch, 0, &x);
 				if (r >= 0) fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>11&7, r>>8&7);
@@ -476,10 +488,7 @@ static void worker_count(void *_data, long k, int tid)
 	for (i = l = 0; i < s->l_seq; ++i) {
 		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
 		if (c < 4) {
-			x.x[0] = (x.x[0]<<1 | (c&1))  & aux->mask;
-			x.x[1] = (x.x[1]<<1 | (c>>1)) & aux->mask;
-			x.x[2] = x.x[2]>>1 | (1ULL^(c&1))<<(o->k-1);
-			x.x[3] = x.x[3]>>1 | (1ULL^c>>1) <<(o->k-1);
+			bfc_kmer_append(o->k, x.x, c);
 			if (++l >= o->k) {
 				int low_flag = 0;
 				if (s->qual) {
@@ -520,13 +529,93 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 	return 0;
 }
 
+/**************************
+ * Sequence struct for ec *
+ **************************/
+
+#include "kvec.h"
+
+typedef struct { // NOTE: unaligned memory
+	uint8_t b:3, ob:3, q:1, oq:1;
+	int i;
+} ecbase_t;
+
+typedef kvec_t(ecbase_t) ecseq_t;
+
+static int bfc_seq_conv(const char *s, const char *q, int qthres, ecseq_t *seq)
+{
+	int i, l;
+	l = strlen(s);
+	kv_resize(ecbase_t, *seq, l);
+	seq->n = l;
+	for (i = 0; i < l; ++i) {
+		ecbase_t *c = &seq->a[i];
+		c->b = c->ob = seq_nt6_table[(int)s[i]] - 1;
+		c->q = c->oq = !q? 1 : q[i] - 33 >= qthres? 1 : 0;
+		c->i = i;
+	}
+	return l;
+}
+
+static inline ecbase_t ecbase_comp(const ecbase_t *b)
+{
+	ecbase_t r = *b;
+	r.b = b->b < 4? 3 - b->b : 4;
+	r.ob = b->ob < 4? 3 - b->ob : 4;
+	return r;
+}
+
+static void bfc_seq_revcomp(ecseq_t *seq)
+{
+	int i;
+	for (i = 0; i < seq->n>>1; ++i) {
+		ecbase_t tmp;
+		tmp = ecbase_comp(&seq->a[i]);
+		seq->a[i] = ecbase_comp(&seq->a[seq->n - 1 - i]);
+		seq->a[seq->n - 1 - i] = tmp;
+	}
+	if (seq->n&1) seq->a[i] = ecbase_comp(&seq->a[i]);
+}
+
 /********************
  * Correct one read *
  ********************/
 
+#include "kalloc.h"
+#include "ksort.h"
+
 typedef struct {
+	int penalty, pos, l;
+	bfc_kmer_t x;
+} echeap1_t;
+
+typedef struct {
+	const bfc_opt_t *opt;
 	const bfc_ch_t *ch;
-} bfc_ec1_t;
+	kchash_t *kc;
+	kmem_t *km;
+	kvec_t(echeap1_t) heap;
+} bfc_ec1buf_t;
+
+#define heap_lt(a, b) ((a).penalty > (b).penalty)
+KSORT_INIT(ec, echeap1_t, heap_lt)
+
+void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
+{
+	while (1) {
+		echeap1_t z = kv_pop(e->heap);
+		ks_heapdown_ec(0, e->heap.n, e->heap.a);
+		if (z.pos >= seq->n) { // reach to the end
+		} else {
+			int c = seq->a[z.pos].ob;
+			if (c < 4) { // A, C, G or T
+				bfc_kmer_t x = z.x;
+				bfc_kmer_append(e->opt->k, x.x, c);
+			} else { // N
+			}
+		}
+	}
+}
 
 /********************
  * Error correction *
