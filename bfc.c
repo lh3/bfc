@@ -21,44 +21,6 @@ static inline uint64_t bfc_hash_64(uint64_t key, uint64_t mask)
 	return key;
 }
 
-// The inversion of hash_64(). Modified from <https://naml.us/blog/tag/invertible>
-static inline uint64_t bfc_hash_64i(uint64_t key, uint64_t mask)
-{
-	uint64_t tmp;
-
-	// Invert key = key + (key << 31)
-	tmp = (key - (key << 31));
-	key = (key - (tmp << 31)) & mask;
-
-	// Invert key = key ^ (key >> 28)
-	tmp = key ^ key >> 28;
-	key = key ^ tmp >> 28;
-
-	// Invert key *= 21
-	key = (key * 14933078535860113213ull) & mask;
-
-	// Invert key = key ^ (key >> 14)
-	tmp = key ^ key >> 14;
-	tmp = key ^ tmp >> 14;
-	tmp = key ^ tmp >> 14;
-	key = key ^ tmp >> 14;
-
-	// Invert key *= 265
-	key = (key * 15244667743933553977ull) & mask;
-
-	// Invert key = key ^ (key >> 24)
-	tmp = key ^ key >> 24;
-	key = key ^ tmp >> 24;
-
-	// Invert key = (~key) + (key << 21)
-	tmp = ~key;
-	tmp = ~(key - (tmp << 21));
-	tmp = ~(key - (tmp << 21));
-	key = ~(key - (tmp << 21)) & mask;
-
-	return key;
-}
-
 /****************
  * Sequence I/O *
  ****************/
@@ -584,10 +546,25 @@ static void bfc_seq_revcomp(ecseq_t *seq)
 #include "kalloc.h"
 #include "ksort.h"
 
+#define BFC_MAX_PATHS 8
+#define BFC_MAX_PDIFF 3
+
 typedef struct {
-	int penalty, pos, l;
+	uint8_t ec:1, ec_high:1, absent:1;
+} bfc_penalty_t;
+
+typedef struct {
+	int tot_pen;
+	int i; // base position
+	int k; // position in the stack
 	bfc_kmer_t x;
 } echeap1_t;
+
+typedef struct {
+	int parent, i, tot_pen;
+	uint8_t b;
+	bfc_penalty_t pen;
+} ecstack1_t;
 
 typedef struct {
 	const bfc_opt_t *opt;
@@ -595,23 +572,87 @@ typedef struct {
 	kchash_t *kc;
 	kmem_t *km;
 	kvec_t(echeap1_t) heap;
+	kvec_t(ecstack1_t) stack;
 } bfc_ec1buf_t;
 
-#define heap_lt(a, b) ((a).penalty > (b).penalty)
+#define heap_lt(a, b) ((a).tot_pen > (b).tot_pen)
 KSORT_INIT(ec, echeap1_t, heap_lt)
+
+static void update_buf(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalty_t pen)
+{
+	ecstack1_t *q;
+	echeap1_t *r;
+	// update stack
+	kv_pushp(ecstack1_t, e->stack, &q);
+	q->parent = prev->k;
+	q->i = prev->i;
+	q->b = b;
+	q->pen = pen;
+	q->tot_pen = prev->tot_pen + (int)pen.ec + pen.ec_high + pen.absent;
+	// update heap
+	kv_pushp(echeap1_t, e->heap, &r);
+	r->i = prev->i + 1;
+	r->k = e->stack.n - 1;
+	r->x = prev->x;
+	r->tot_pen = q->tot_pen;
+	bfc_kmer_append(e->opt->k, r->x.x, b);
+}
 
 void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 {
+	echeap1_t z;
+	int l, path[BFC_MAX_PATHS], n_paths = 0;
+	memset(&z, 0, sizeof(echeap1_t));
+	for (z.i = 0; z.i < seq->n; ++z.i) {
+		int c = seq->a[z.i].ob;
+		if (c < 4) {
+			bfc_kmer_append(e->opt->k, z.x.x, c);
+			if (++l == e->opt->k) break;
+		} else l = 0, z.x = bfc_kmer_null;
+	}
+	if (z.i == seq->n) return;
+	z.k = -1; // doesn't have a position in the stack
+	kv_push(echeap1_t, e->heap, z);
 	while (1) {
 		echeap1_t z = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
-		if (z.pos >= seq->n) { // reach to the end
+		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
+		if (z.i >= seq->n) { // reach to the end
+			path[n_paths++] = z.k;
+			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
-			int c = seq->a[z.pos].ob;
-			if (c < 4) { // A, C, G or T
+			ecbase_t *c = &seq->a[z.i];
+			int s[4], t[4], b;
+			// collect next bases to extend
+			t[0] = t[1] = t[2] = t[3] = 1;
+			s[0] = s[1] = s[2] = s[3] = -3;
+			if (c->ob < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
-				bfc_kmer_append(e->opt->k, x.x, c);
-			} else { // N
+				bfc_kmer_append(e->opt->k, x.x, c->ob);
+				s[c->ob] = bfc_kc_get(e->ch, e->kc, &x);
+				if (s[c->ob] > 0 && (s[c->ob]&0xff) >= e->opt->min_cov && c->oq)
+					t[0] = t[1] = t[2] = t[3] = 0, t[c->ob] = 1;
+			}
+			// test next bases
+			for (b = 0; b < 4; ++b) {
+				bfc_penalty_t pen;
+				int is_solid;
+				if (!t[b]) continue;
+				if (s[b] == -3) { // get the tip info if this hasn't been done
+					bfc_kmer_t x = z.x;
+					bfc_kmer_append(e->opt->k, x.x, b);
+					s[b] = bfc_kc_get(e->ch, e->kc, &x);
+				}
+				is_solid = (s[b] > 0 && (s[b]&0xff) >= e->opt->min_cov);
+				if (c->ob == b) {
+					pen.ec = pen.ec_high = 0;
+					pen.absent = !is_solid;
+					update_buf(e, &z, b, pen);
+				} else if (is_solid) {
+					pen.ec = 1, pen.ec_high = c->oq;
+					pen.absent = 0;
+					update_buf(e, &z, b, pen);
+				}
 			}
 		}
 	}
