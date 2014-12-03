@@ -108,7 +108,8 @@ typedef struct {
 	int n_threads;
 	int k, q;
 	int n_shift, n_hashes;
-	int min_cov;
+	int min_cov; // a k-mer is considered solid if the count is no less than this
+	int win_multi_ec; // no 2 high-qual corrections or 4 corrections in a window of this size
 } bfc_opt_t;
 
 void bfc_opt_init(bfc_opt_t *opt)
@@ -122,6 +123,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->n_hashes = 4;
 
 	opt->min_cov = 3;
+	opt->win_multi_ec = 16;
 }
 
 void bfc_opt_by_size(bfc_opt_t *opt, long size)
@@ -557,6 +559,8 @@ typedef struct {
 	int tot_pen;
 	int i; // base position
 	int k; // position in the stack
+	int ecpos_high; // position of the last high-qual correction
+	uint64_t ecpos4; // positions of last 4 corrections
 	bfc_kmer_t x;
 } echeap1_t;
 
@@ -594,6 +598,8 @@ static void update_buf(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalt
 	r->i = prev->i + 1;
 	r->k = e->stack.n - 1;
 	r->x = prev->x;
+	if (pen.ec_high) r->ecpos_high = prev->i;
+	if (pen.ec) r->ecpos4 = r->ecpos4<<16 | prev->i;
 	r->tot_pen = q->tot_pen;
 	bfc_kmer_append(e->opt->k, r->x.x, b);
 }
@@ -602,6 +608,7 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 {
 	echeap1_t z;
 	int l, path[BFC_MAX_PATHS], n_paths = 0;
+	assert(seq->n < 0x10000);
 	memset(&z, 0, sizeof(echeap1_t));
 	for (z.i = 0; z.i < seq->n; ++z.i) {
 		int c = seq->a[z.i].ob;
@@ -611,7 +618,7 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 		} else l = 0, z.x = bfc_kmer_null;
 	}
 	if (z.i == seq->n) return;
-	z.k = -1; // doesn't have a position in the stack
+	z.k = -1; z.ecpos_high = -1;
 	kv_push(echeap1_t, e->heap, z);
 	while (1) {
 		echeap1_t z = kv_pop(e->heap);
@@ -622,40 +629,39 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
 			ecbase_t *c = &seq->a[z.i];
-			int s[4], t[4], b;
-			// collect next bases to extend
-			t[0] = t[1] = t[2] = t[3] = 1;
-			s[0] = s[1] = s[2] = s[3] = -3;
+			int b, os = -1, no_others = 0;
+			// test if the read extension alone is enough
 			if (c->ob < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->ob);
-				s[c->ob] = bfc_kc_get(e->ch, e->kc, &x);
-				if (s[c->ob] > 0 && (s[c->ob]&0xff) >= e->opt->min_cov && c->oq)
-					t[0] = t[1] = t[2] = t[3] = 0, t[c->ob] = 1;
+				os = bfc_kc_get(e->ch, e->kc, &x);
+				if (os > 0 && (os&0xff) >= e->opt->min_cov && c->oq)
+					no_others = 1;
 			}
-			// test next bases
+			// extension
 			for (b = 0; b < 4; ++b) {
 				bfc_penalty_t pen;
-				int is_solid;
-				if (!t[b]) continue;
-				if (s[b] == -3) { // get the tip info if this hasn't been done
+				if (no_others && b != c->ob) continue;
+				if (b != c->ob) {
+					int s;
 					bfc_kmer_t x = z.x;
+					if (z.ecpos_high >= 0 && z.i - z.ecpos_high < e->opt->win_multi_ec) continue;
+					if (z.i - (z.ecpos4>>48) < e->opt->win_multi_ec) continue;
 					bfc_kmer_append(e->opt->k, x.x, b);
-					s[b] = bfc_kc_get(e->ch, e->kc, &x);
-				}
-				is_solid = (s[b] > 0 && (s[b]&0xff) >= e->opt->min_cov);
-				if (c->ob == b) {
-					pen.ec = pen.ec_high = 0;
-					pen.absent = !is_solid;
-					update_buf(e, &z, b, pen);
-				} else if (is_solid) {
+					s = bfc_kc_get(e->ch, e->kc, &x);
+					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
+					if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently good
 					pen.ec = 1, pen.ec_high = c->oq;
 					pen.absent = 0;
 					update_buf(e, &z, b, pen);
+				} else {
+					pen.ec = pen.ec_high = 0;
+					pen.absent = (os < 0 || (os&0xff) < e->opt->min_cov);
+					update_buf(e, &z, b, pen);
 				}
-			}
-		}
-	}
+			} // ~for(b)
+		} // ~else
+	} // ~while(1)
 }
 
 /********************
