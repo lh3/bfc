@@ -50,7 +50,7 @@ unsigned char seq_nt6_table[256] = {
 
 typedef struct {
 	int l_seq;
-	char *seq, *qual;
+	char *name, *seq, *qual;
 } bseq1_t;
 
 bseq1_t *bseq_read(kseq_t *ks, int chunk_size, int *n_)
@@ -65,6 +65,7 @@ bseq1_t *bseq_read(kseq_t *ks, int chunk_size, int *n_)
 			seqs = realloc(seqs, m * sizeof(bseq1_t));
 		}
 		s = &seqs[n];
+		s->name = strdup(ks->name.s);
 		s->seq = strdup(ks->seq.s);
 		s->qual = ks->qual.l? strdup(ks->qual.s) : 0;
 		s->l_seq = ks->seq.l;
@@ -414,7 +415,7 @@ void bfc_kc_print_kcov(const bfc_ch_t *ch, const char *seq)
 static double bfc_real_time;
 
 typedef struct {
-	bfc_opt_t opt;
+	const bfc_opt_t *opt;
 	uint64_t mask;
 	kseq_t *ks;
 	bfc_bf_t *bf;
@@ -429,7 +430,7 @@ typedef struct {
 
 void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int low_flag)
 {
-	int k = aux->opt.k, ret;
+	int k = aux->opt->k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
 	uint64_t mask = (1ULL<<k) - 1, y[2], hash;
 	y[0] = bfc_hash_64(x->x[t<<1|0], mask);
@@ -437,7 +438,7 @@ void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int low_flag)
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
 	if (t) low_flag = (low_flag&1)<<1 | (low_flag&2)>>1;
-	if (ret == aux->opt.n_hashes)
+	if (ret == aux->opt->n_hashes)
 		bfc_ch_insert(aux->ch, y, low_flag);
 }
 
@@ -446,7 +447,7 @@ static void worker_count(void *_data, long k, int tid)
 	bfc_count_data_t *data = (bfc_count_data_t*)_data;
 	bfc_cntaux_t *aux = data->aux;
 	bseq1_t *s = &data->seqs[k];
-	const bfc_opt_t *o = &aux->opt;
+	const bfc_opt_t *o = aux->opt;
 	int i, l;
 	bfc_kmer_t x = bfc_kmer_null;
 	for (i = l = 0; i < s->l_seq; ++i) {
@@ -474,7 +475,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 	if (step == 0) {
 		bfc_count_data_t *ret;
 		ret = calloc(1, sizeof(bfc_count_data_t));
-		ret->seqs = bseq_read(aux->ks, aux->opt.chunk_size, &ret->n_seqs);
+		ret->seqs = bseq_read(aux->ks, aux->opt->chunk_size, &ret->n_seqs);
 		ret->aux = aux;
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
 		if (ret->seqs) return ret;
@@ -482,11 +483,12 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 	} else if (step == 1) {
 		int i;
 		bfc_count_data_t *data = (bfc_count_data_t*)_data;
-		kt_for(aux->opt.n_threads, worker_count, data, data->n_seqs);
+		kt_for(aux->opt->n_threads, worker_count, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs; # distinct k-mers: %ld)\n",
 				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time, (long)bfc_ch_count(aux->ch));
 		for (i = 0; i < data->n_seqs; ++i) {
-			free(data->seqs[i].seq); free(data->seqs[i].qual);
+			bseq1_t *s = &data->seqs[i];
+			free(s->seq); free(s->qual); free(s->name);
 		}
 		free(data->seqs); free(data);
 	}
@@ -501,6 +503,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 
 typedef struct { // NOTE: unaligned memory
 	uint8_t b:3, ob:3, q:1, oq:1;
+	uint8_t ec:1, absent:1, diff:6;
 	int i;
 } ecbase_t;
 
@@ -545,7 +548,6 @@ static void bfc_seq_revcomp(ecseq_t *seq)
  * Correct one read *
  ********************/
 
-#include "kalloc.h"
 #include "ksort.h"
 
 #define BFC_MAX_PATHS 8
@@ -554,6 +556,10 @@ static void bfc_seq_revcomp(ecseq_t *seq)
 typedef struct {
 	uint8_t ec:1, ec_high:1, absent:1;
 } bfc_penalty_t;
+
+typedef struct {
+	int n_ec, n_ec_high, n_absent;
+} ecstats_t;
 
 typedef struct {
 	int tot_pen;
@@ -574,15 +580,30 @@ typedef struct {
 	const bfc_opt_t *opt;
 	const bfc_ch_t *ch;
 	kchash_t *kc;
-	kmem_t *km;
 	kvec_t(echeap1_t) heap;
 	kvec_t(ecstack1_t) stack;
+	ecseq_t ori_seq, tmp, ec[2];
 } bfc_ec1buf_t;
 
 #define heap_lt(a, b) ((a).tot_pen > (b).tot_pen)
 KSORT_INIT(ec, echeap1_t, heap_lt)
 
-static void update_buf(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalty_t pen)
+static bfc_ec1buf_t *ec1buf_init(const bfc_opt_t *opt, bfc_ch_t *ch)
+{
+	bfc_ec1buf_t *e;
+	e = calloc(1, sizeof(bfc_ec1buf_t));
+	e->opt = opt, e->ch = ch;
+	e->kc = kh_init(kc);
+	return e;
+}
+
+static void ec1buf_destroy(bfc_ec1buf_t *e)
+{	
+	kh_destroy(kc, e->kc);
+	free(e->heap.a); free(e->stack.a); free(e->tmp.a); free(e->ec[0].a); free(e->ec[1].a);
+}
+
+static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalty_t pen)
 {
 	ecstack1_t *q;
 	echeap1_t *r;
@@ -599,17 +620,43 @@ static void update_buf(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalt
 	r->k = e->stack.n - 1;
 	r->x = prev->x;
 	if (pen.ec_high) r->ecpos_high = prev->i;
-	if (pen.ec) r->ecpos4 = r->ecpos4<<16 | prev->i;
+	if (pen.ec || pen.ec_high) r->ecpos4 = r->ecpos4<<16 | prev->i;
 	r->tot_pen = q->tot_pen;
 	bfc_kmer_append(e->opt->k, r->x.x, b);
 }
 
-void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
+static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *ori_seq, ecseq_t *path)
+{
+	int i;
+	kv_resize(ecbase_t, *path, ori_seq->n);
+	path->n = ori_seq->n;
+	for (i = 0; i < path->n; ++i) path->a[i] = ori_seq->a[i];
+	while (end >= 0) {
+		i = s[end].i;
+		path->a[i].b = s[end].b;
+		path->a[i].ec = s[end].pen.ec;
+		path->a[i].absent = s[end].pen.absent;
+		end = s[end].parent;
+	}
+}
+
+static void adjust_min_diff(int diff, ecseq_t *opt, const ecseq_t *sub)
+{
+	int i;
+	diff = diff < 63? diff : 63;
+	for (i = 0; i < opt->n; ++i)
+		if (opt->a[i].b != sub->a[i].b && opt->a[i].diff < diff)
+			opt->a[i].diff = diff;
+}
+
+static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 {
 	echeap1_t z;
-	int l, path[BFC_MAX_PATHS], n_paths = 0;
+	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0;
 	assert(seq->n < 0x10000);
+	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
+	for (i = 0; i < seq->n; ++i) ec->a[i] = seq->a[i];
 	for (z.i = 0; z.i < seq->n; ++z.i) {
 		int c = seq->a[z.i].ob;
 		if (c < 4) {
@@ -617,11 +664,13 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 			if (++l == e->opt->k) break;
 		} else l = 0, z.x = bfc_kmer_null;
 	}
-	if (z.i == seq->n) return;
+	if (z.i == seq->n) return -1;
 	z.k = -1; z.ecpos_high = -1;
 	kv_push(echeap1_t, e->heap, z);
+	// exhaustive error correction
 	while (1) {
-		echeap1_t z = kv_pop(e->heap);
+		if (e->heap.n == 0) return -2; // may happen when there is an uncorrectable "N"
+		z = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
 		if (z.i >= seq->n) { // reach to the end
@@ -629,7 +678,7 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
 			ecbase_t *c = &seq->a[z.i];
-			int b, os = -1, no_others = 0;
+			int b, os = -1, no_others = 0, other_ext = 0;
 			// test if the read extension alone is enough
 			if (c->ob < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
@@ -653,20 +702,105 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 					if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently good
 					pen.ec = 1, pen.ec_high = c->oq;
 					pen.absent = 0;
-					update_buf(e, &z, b, pen);
+					buf_update(e, &z, b, pen);
+					++other_ext;
 				} else {
 					pen.ec = pen.ec_high = 0;
 					pen.absent = (os < 0 || (os&0xff) < e->opt->min_cov);
-					update_buf(e, &z, b, pen);
+					buf_update(e, &z, b, pen);
 				}
 			} // ~for(b)
+			if (no_others == 0 && other_ext == 0) ++n_failures;
+			if (n_failures > seq->n) break;
 		} // ~else
 	} // ~while(1)
+	// backtrack
+	if (n_paths == 0) return -3;
+	buf_backtrack(e->stack.a, path[i], seq, ec);
+	for (i = 0; i < ec->n; ++i) ec->a[i].diff = 63;
+	for (i = 1; i < n_paths; ++i) {
+		int diff = e->stack.a[path[i]].tot_pen - e->stack.a[path[0]].tot_pen;
+		buf_backtrack(e->stack.a, path[i], seq, &e->tmp);
+		adjust_min_diff(diff, ec, &e->tmp);
+	}
+	return 0;
+}
+
+void bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
+{
+	int i, ret[2];
+	bfc_seq_conv(seq, qual, e->opt->q, &e->ori_seq);
+	ret[0] = bfc_ec1dir(e, &e->ori_seq, &e->ec[0]);
+	bfc_seq_revcomp(&e->ori_seq);
+	ret[1] = bfc_ec1dir(e, &e->ori_seq, &e->ec[1]);
+	bfc_seq_revcomp(&e->ec[1]);
+	bfc_seq_revcomp(&e->ori_seq);
+	for (i = 0; i < e->ori_seq.n; ++i) {
+		if (e->ec[0].a[i].b == e->ec[1].a[i].b)
+			e->ori_seq.a[i].b = e->ec[0].a[i].b;
+		else e->ori_seq.a[i].b = e->ori_seq.a[i].ob;
+	}
+	for (i = 0; i < e->ori_seq.n; ++i)
+		seq[i] = "ACGTN"[e->ori_seq.a[i].b];
 }
 
 /********************
  * Error correction *
  ********************/
+
+typedef struct {
+	const bfc_opt_t *opt;
+	const bfc_ch_t *ch;
+	kseq_t *ks;
+	bfc_ec1buf_t **e;
+	int64_t n_processed;
+} bfc_ecaux_t;
+
+typedef struct {
+	int n_seqs;
+	bseq1_t *seqs;
+	bfc_ecaux_t *aux;
+} bfc_ec_data_t;
+
+static void worker_ec(void *_data, long k, int tid)
+{
+	bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
+	bfc_ecaux_t *aux = data->aux;
+	bseq1_t *s = &data->seqs[k];
+	int i;
+	for (i = 0; i < s->l_seq; ++i)
+		bfc_ec1(aux->e[tid], s->seq, s->qual);
+}
+
+void *bfc_ec_cb(void *shared, int step, void *_data)
+{
+	bfc_ecaux_t *aux = (bfc_ecaux_t*)shared;
+	if (step == 0) {
+		bfc_ec_data_t *ret;
+		ret = calloc(1, sizeof(bfc_ec_data_t));
+		ret->seqs = bseq_read(aux->ks, aux->opt->chunk_size, &ret->n_seqs);
+		ret->aux = aux;
+		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
+		if (ret->seqs) return ret;
+		else free(ret);
+	} else if (step == 1) {
+		bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
+		kt_for(aux->opt->n_threads, worker_ec, data, data->n_seqs);
+		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs)\n",
+				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
+	} else if (step == 2) {
+		bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
+		int i;
+		for (i = 0; i < data->n_seqs; ++i) {
+			bseq1_t *s = &data->seqs[i];
+			printf("%c%s\n%s\n", s->qual? '@' : '>', s->name, s->seq);
+			if (s->qual) printf("+\n%s\n", s->qual);
+			free(s->seq); free(s->qual); free(s->name);
+		}
+		free(data->seqs); free(data);
+	}
+	return 0;
+}
 
 /**************
  * Main entry *
@@ -675,21 +809,23 @@ void bfc_ec1dir(bfc_ec1buf_t *e, ecseq_t *seq)
 int main(int argc, char *argv[])
 {
 	gzFile fp;
+	bfc_opt_t opt;
 	bfc_cntaux_t aux;
 	int i, c, no_mt_io = 0;
 	char *in_hash = 0, *out_hash = 0, *str_kcov = 0;
 
 	bfc_real_time = realtime();
-	bfc_opt_init(&aux.opt);
+	bfc_opt_init(&opt);
+	aux.opt = &opt;
 	while ((c = getopt(argc, argv, "d:k:s:b:L:t:C:h:q:Jr:")) >= 0) {
-		if (c == 'k') aux.opt.k = atoi(optarg);
+		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
-		else if (c == 'q') aux.opt.q = atoi(optarg);
-		else if (c == 'b') aux.opt.n_shift = atoi(optarg);
-		else if (c == 't') aux.opt.n_threads = atoi(optarg);
-		else if (c == 'h') aux.opt.n_hashes = atoi(optarg);
+		else if (c == 'q') opt.q = atoi(optarg);
+		else if (c == 'b') opt.n_shift = atoi(optarg);
+		else if (c == 't') opt.n_threads = atoi(optarg);
+		else if (c == 'h') opt.n_hashes = atoi(optarg);
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'L' || c == 's') {
 			double x;
@@ -699,21 +835,21 @@ int main(int argc, char *argv[])
 			else if (*p == 'M' || *p == 'm') x *= 1e6;
 			else if (*p == 'K' || *p == 'k') x *= 1e3;
 			if (c == 's') {
-				bfc_opt_by_size(&aux.opt, (long)x + 1);
-				fprintf(stderr, "[M::%s] set k to %d\n", __func__, aux.opt.k);
-			} else if (c == 'L') aux.opt.chunk_size = (long)x + 1;
+				bfc_opt_by_size(&opt, (long)x + 1);
+				fprintf(stderr, "[M::%s] set k to %d\n", __func__, opt.k);
+			} else if (c == 'L') opt.chunk_size = (long)x + 1;
 		}
 	}
-	aux.mask = (1ULL<<aux.opt.k) - 1;
+	aux.mask = (1ULL<<opt.k) - 1;
 
 	if (optind == argc) {
 		fprintf(stderr, "\n");
 		fprintf(stderr, "Usage:   bfc [options] <in.fq>\n\n");
 		fprintf(stderr, "Options: -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
-		fprintf(stderr, "         -k INT       k-mer length [%d]\n", aux.opt.k);
-		fprintf(stderr, "         -t INT       number of threads [%d]\n", aux.opt.n_threads);
-		fprintf(stderr, "         -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", aux.opt.n_shift);
-		fprintf(stderr, "         -h INT       use INT hash functions for Bloom Filter [%d]\n", aux.opt.n_hashes);
+		fprintf(stderr, "         -k INT       k-mer length [%d]\n", opt.k);
+		fprintf(stderr, "         -t INT       number of threads [%d]\n", opt.n_threads);
+		fprintf(stderr, "         -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", opt.n_shift);
+		fprintf(stderr, "         -h INT       use INT hash functions for Bloom Filter [%d]\n", opt.n_hashes);
 		fprintf(stderr, "         -d FILE      dump hash table to FILE [null]\n");
 		fprintf(stderr, "         -r FILE      restore hash table from FILE [null]\n");
 		fprintf(stderr, "\n");
@@ -721,8 +857,8 @@ int main(int argc, char *argv[])
 	}
 
 	if (in_hash == 0) {
-		aux.bf = bfc_bf_init(aux.opt.n_shift, aux.opt.n_hashes);
-		aux.ch = bfc_ch_init(aux.opt.k);
+		aux.bf = bfc_bf_init(opt.n_shift, opt.n_hashes);
+		aux.ch = bfc_ch_init(opt.k);
 
 		fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
 		aux.ks = kseq_init(fp);
