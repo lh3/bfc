@@ -750,7 +750,6 @@ void bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 
 typedef struct {
 	const bfc_opt_t *opt;
-	const bfc_ch_t *ch;
 	kseq_t *ks;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
@@ -810,14 +809,14 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	bfc_opt_t opt;
-	bfc_cntaux_t aux;
-	int i, c, no_mt_io = 0;
+	bfc_cntaux_t caux;
+	int i, c, no_mt_io = 0, no_ec = 0;
 	char *in_hash = 0, *out_hash = 0, *str_kcov = 0;
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
-	aux.opt = &opt;
-	while ((c = getopt(argc, argv, "d:k:s:b:L:t:C:h:q:Jr:")) >= 0) {
+	caux.opt = &opt;
+	while ((c = getopt(argc, argv, "Ed:k:s:b:L:t:C:h:q:Jr:")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
@@ -827,6 +826,7 @@ int main(int argc, char *argv[])
 		else if (c == 't') opt.n_threads = atoi(optarg);
 		else if (c == 'h') opt.n_hashes = atoi(optarg);
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
+		else if (c == 'E') no_ec = 1;
 		else if (c == 'L' || c == 's') {
 			double x;
 			char *p;
@@ -840,7 +840,7 @@ int main(int argc, char *argv[])
 			} else if (c == 'L') opt.chunk_size = (long)x + 1;
 		}
 	}
-	aux.mask = (1ULL<<opt.k) - 1;
+	caux.mask = (1ULL<<opt.k) - 1;
 
 	if (optind == argc) {
 		fprintf(stderr, "\n");
@@ -852,28 +852,45 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "         -h INT       use INT hash functions for Bloom Filter [%d]\n", opt.n_hashes);
 		fprintf(stderr, "         -d FILE      dump hash table to FILE [null]\n");
 		fprintf(stderr, "         -r FILE      restore hash table from FILE [null]\n");
+		fprintf(stderr, "         -E           skip error correction\n");
 		fprintf(stderr, "\n");
 		return 1;
 	}
 
 	if (in_hash == 0) {
-		aux.bf = bfc_bf_init(opt.n_shift, opt.n_hashes);
-		aux.ch = bfc_ch_init(opt.k);
+		caux.bf = bfc_bf_init(opt.n_shift, opt.n_hashes);
+		caux.ch = bfc_ch_init(opt.k);
 
 		fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
-		aux.ks = kseq_init(fp);
-		kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &aux, 2);
-		kseq_destroy(aux.ks);
+		caux.ks = kseq_init(fp);
+		kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
+		kseq_destroy(caux.ks);
 		gzclose(fp);
 
-		bfc_bf_destroy(aux.bf);
-		aux.bf = 0;
-	} else aux.ch = bfc_ch_restore(in_hash);
+		bfc_bf_destroy(caux.bf);
+		caux.bf = 0;
+	} else caux.ch = bfc_ch_restore(in_hash);
 
-	if (str_kcov) bfc_kc_print_kcov(aux.ch, str_kcov);
-	if (out_hash) bfc_ch_dump(aux.ch, out_hash);
-	bfc_ch_destroy(aux.ch);
-	bfc_bf_destroy(aux.bf);
+	if (str_kcov) bfc_kc_print_kcov(caux.ch, str_kcov);
+	if (out_hash) bfc_ch_dump(caux.ch, out_hash);
+
+	if (!no_ec) {
+		bfc_ecaux_t eaux;
+		eaux.opt = &opt;
+		eaux.e = calloc(opt.n_threads, sizeof(void*));
+		for (i = 0; i < opt.n_threads; ++i)
+			eaux.e[i] = ec1buf_init(&opt, caux.ch);
+		fp = gzopen(argv[optind], "r");
+		eaux.ks = kseq_init(fp);
+		kt_pipeline(no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
+		kseq_destroy(eaux.ks);
+		gzclose(fp);
+		for (i = 0; i < opt.n_threads; ++i)
+			ec1buf_destroy(eaux.e[i]);
+		free(eaux.e);
+	}
+
+	bfc_ch_destroy(caux.ch);
 
 	fprintf(stderr, "[M::%s] CMD:", __func__);
 	for (i = 0; i < argc; ++i)
