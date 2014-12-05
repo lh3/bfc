@@ -391,19 +391,16 @@ int bfc_kc_get(const bfc_ch_t *ch, kchash_t *kc, const bfc_kmer_t *z)
 	return r;
 }
 
-void bfc_kc_print_kcov(const bfc_ch_t *ch, const char *seq)
+void bfc_kc_print_kcov(const bfc_ch_t *ch, kchash_t *kc, const char *seq)
 {
-	int len, i, l;
+	int len, i, l, r, c;
 	len = strlen(seq);
 	bfc_kmer_t x = bfc_kmer_null;
 	for (i = l = 0; i < len; ++i) {
-		int c = seq_nt6_table[(uint8_t)seq[i]] - 1;
-		if (c < 4) {
+		if ((c = seq_nt6_table[(uint8_t)seq[i]] - 1) < 4) {
 			bfc_kmer_append(ch->k, x.x, c);
-			if (++l >= ch->k) {
-				int r = bfc_kc_get(ch, 0, &x);
-				if (r >= 0) fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>11&7, r>>8&7);
-			}
+			if (++l >= ch->k && (r = bfc_kc_get(ch, kc, &x)) >= 0)
+				fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>11&7, r>>8&7);
 		} else l = 0, x = bfc_kmer_null;
 	}
 }
@@ -656,12 +653,13 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 	assert(seq->n < 0x10000);
 	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
+	kv_resize(ecbase_t, *ec, seq->n);
 	for (i = 0; i < seq->n; ++i) ec->a[i] = seq->a[i];
-	for (z.i = 0; z.i < seq->n; ++z.i) {
+	for (z.i = l = 0; z.i < seq->n; ++z.i) {
 		int c = seq->a[z.i].ob;
 		if (c < 4) {
-			bfc_kmer_append(e->opt->k, z.x.x, c);
 			if (++l == e->opt->k) break;
+			bfc_kmer_append(e->opt->k, z.x.x, c);
 		} else l = 0, z.x = bfc_kmer_null;
 	}
 	if (z.i == seq->n) return -1;
@@ -684,7 +682,10 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->ob);
 				os = bfc_kc_get(e->ch, e->kc, &x);
-				if (os > 0 && (os&0xff) >= e->opt->min_cov && c->oq)
+				printf("%c\t%d\t", "ACGTN"[seq->a[z.i].ob], z.i);
+				if (os >= 0) printf("%d\t%d\t%d\n", os&0xff, os>>11&7, os>>8&7);
+				else printf("-1\t-1\t-1\n");
+				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq)
 					no_others = 1;
 			}
 			// extension
@@ -766,9 +767,7 @@ static void worker_ec(void *_data, long k, int tid)
 	bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
 	bfc_ecaux_t *aux = data->aux;
 	bseq1_t *s = &data->seqs[k];
-	int i;
-	for (i = 0; i < s->l_seq; ++i)
-		bfc_ec1(aux->e[tid], s->seq, s->qual);
+	bfc_ec1(aux->e[tid], s->seq, s->qual);
 }
 
 void *bfc_ec_cb(void *shared, int step, void *_data)
@@ -787,6 +786,7 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		kt_for(aux->opt->n_threads, worker_ec, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs)\n",
 				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
+		return data;
 	} else if (step == 2) {
 		bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
 		int i;
@@ -871,7 +871,7 @@ int main(int argc, char *argv[])
 		caux.bf = 0;
 	} else caux.ch = bfc_ch_restore(in_hash);
 
-	if (str_kcov) bfc_kc_print_kcov(caux.ch, str_kcov);
+	if (str_kcov) bfc_kc_print_kcov(caux.ch, 0, str_kcov);
 	if (out_hash) bfc_ch_dump(caux.ch, out_hash);
 
 	if (!no_ec) {
