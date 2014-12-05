@@ -104,6 +104,8 @@ double realtime()
 
 #include <math.h>
 
+int bfc_verbose = 3;
+
 typedef struct {
 	int chunk_size;
 	int n_threads;
@@ -620,6 +622,9 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalt
 	if (pen.ec || pen.ec_high) r->ecpos4 = r->ecpos4<<16 | prev->i;
 	r->tot_pen = q->tot_pen;
 	bfc_kmer_append(e->opt->k, r->x.x, b);
+	if (bfc_verbose >= 4)
+		fprintf(stderr, "   <= base:%c penalty:%d\n", pen.ec? "acgtn"[b] : "ACGTN"[b], r->tot_pen);
+	ks_heapup_ec(e->heap.n, e->heap.a);
 }
 
 static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *ori_seq, ecseq_t *path)
@@ -670,6 +675,9 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 		if (e->heap.n == 0) return -2; // may happen when there is an uncorrectable "N"
 		z = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
+		if (bfc_verbose >= 4)
+			fprintf(stderr, "=> base:%c pos:%d stack_size:%ld heap_size:%ld penalty:%d\n",
+					"ACGTN"[seq->a[z.i].ob], z.i, e->stack.n, e->heap.n, z.tot_pen);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
 		if (z.i >= seq->n) { // reach to the end
 			path[n_paths++] = z.k;
@@ -682,11 +690,12 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->ob);
 				os = bfc_kc_get(e->ch, e->kc, &x);
-				printf("%c\t%d\t", "ACGTN"[seq->a[z.i].ob], z.i);
-				if (os >= 0) printf("%d\t%d\t%d\n", os&0xff, os>>11&7, os>>8&7);
-				else printf("-1\t-1\t-1\n");
-				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq)
-					no_others = 1;
+				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq) no_others = 1;
+				if (bfc_verbose >= 4) {
+					fprintf(stderr, "   Original k-mer count: %c,", "ACGTN"[c->ob]);
+					if (os >= 0) fprintf(stderr, "%d:%d:%d\n", os&0xff, os>>11&7, os>>8&7);
+					else fprintf(stderr, "-1:-1:-1\n");
+				}
 			}
 			// extension
 			for (b = 0; b < 4; ++b) {
@@ -699,10 +708,13 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 					if (z.i - (z.ecpos4>>48) < e->opt->win_multi_ec) continue;
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_kc_get(e->ch, e->kc, &x);
+					if (bfc_verbose >= 4 && s >= 0)
+						fprintf(stderr, "   Alternative k-mer count: %c,%d:%d:%d\n", "ACGTN"[b], s&0xff, s>>11&7, s>>8&7);
 					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
 					if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently good
 					pen.ec = 1, pen.ec_high = c->oq;
 					pen.absent = 0;
+					z.x = x;
 					buf_update(e, &z, b, pen);
 					++other_ext;
 				} else {
@@ -816,7 +828,7 @@ int main(int argc, char *argv[])
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
 	caux.opt = &opt;
-	while ((c = getopt(argc, argv, "Ed:k:s:b:L:t:C:h:q:Jr:")) >= 0) {
+	while ((c = getopt(argc, argv, "v:Ed:k:s:b:L:t:C:h:q:Jr:")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
@@ -827,6 +839,7 @@ int main(int argc, char *argv[])
 		else if (c == 'h') opt.n_hashes = atoi(optarg);
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
+		else if (c == 'v') bfc_verbose = atoi(optarg);
 		else if (c == 'L' || c == 's') {
 			double x;
 			char *p;
