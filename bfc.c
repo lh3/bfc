@@ -623,7 +623,7 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalt
 	r->tot_pen = q->tot_pen;
 	bfc_kmer_append(e->opt->k, r->x.x, b);
 	if (bfc_verbose >= 4)
-		fprintf(stderr, "   <= base:%c penalty:%d\n", pen.ec? "acgtn"[b] : "ACGTN"[b], r->tot_pen);
+		fprintf(stderr, "     <= base:%c penalty:%d\n", pen.ec? "acgtn"[b] : "ACGTN"[b], r->tot_pen);
 	ks_heapup_ec(e->heap.n, e->heap.a);
 }
 
@@ -656,6 +656,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 	echeap1_t z;
 	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0;
 	assert(seq->n < 0x10000);
+	if (bfc_verbose >= 4) fprintf(stderr, "o bfc_ec1dir(): len:%ld\n", seq->n);
 	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
 	kv_resize(ecbase_t, *ec, seq->n);
@@ -673,13 +674,15 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 	// exhaustive error correction
 	while (1) {
 		if (e->heap.n == 0) return -2; // may happen when there is an uncorrectable "N"
-		z = kv_pop(e->heap);
+		z = e->heap.a[0];
+		e->heap.a[0] = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
 		if (bfc_verbose >= 4)
-			fprintf(stderr, "=> base:%c pos:%d stack_size:%ld heap_size:%ld penalty:%d\n",
-					"ACGTN"[seq->a[z.i].ob], z.i, e->stack.n, e->heap.n, z.tot_pen);
+			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d\n",
+					z.i, e->stack.n, e->heap.n, z.tot_pen);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
 		if (z.i >= seq->n) { // reach to the end
+			fprintf(stderr, "  ** reached the end\n");
 			path[n_paths++] = z.k;
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
@@ -692,7 +695,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 				os = bfc_kc_get(e->ch, e->kc, &x);
 				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq) no_others = 1;
 				if (bfc_verbose >= 4) {
-					fprintf(stderr, "   Original k-mer count: %c,", "ACGTN"[c->ob]);
+					fprintf(stderr, "     Original k-mer count: %c,", "ACGTN"[c->ob]);
 					if (os >= 0) fprintf(stderr, "%d:%d:%d\n", os&0xff, os>>11&7, os>>8&7);
 					else fprintf(stderr, "-1:-1:-1\n");
 				}
@@ -709,12 +712,11 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_kc_get(e->ch, e->kc, &x);
 					if (bfc_verbose >= 4 && s >= 0)
-						fprintf(stderr, "   Alternative k-mer count: %c,%d:%d:%d\n", "ACGTN"[b], s&0xff, s>>11&7, s>>8&7);
+						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d:%d\n", "ACGTN"[b], s&0xff, s>>11&7, s>>8&7);
 					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
 					if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently good
 					pen.ec = 1, pen.ec_high = c->oq;
 					pen.absent = 0;
-					z.x = x;
 					buf_update(e, &z, b, pen);
 					++other_ext;
 				} else {
@@ -729,7 +731,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 	} // ~while(1)
 	// backtrack
 	if (n_paths == 0) return -3;
-	buf_backtrack(e->stack.a, path[i], seq, ec);
+	buf_backtrack(e->stack.a, path[0], seq, ec);
+	if (bfc_verbose >= 4) fprintf(stderr, "o %d path(s)\n", n_paths);
 	for (i = 0; i < ec->n; ++i) ec->a[i].diff = 63;
 	for (i = 1; i < n_paths; ++i) {
 		int diff = e->stack.a[path[i]].tot_pen - e->stack.a[path[0]].tot_pen;
@@ -754,7 +757,7 @@ void bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		else e->ori_seq.a[i].b = e->ori_seq.a[i].ob;
 	}
 	for (i = 0; i < e->ori_seq.n; ++i)
-		seq[i] = "ACGTN"[e->ori_seq.a[i].b];
+		seq[i] = (e->ori_seq.a[i].b == e->ori_seq.a[i].ob? "ACGTN" : "acgtn")[e->ori_seq.a[i].b];
 }
 
 /********************
