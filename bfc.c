@@ -682,7 +682,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 					z.i, e->stack.n, e->heap.n, z.tot_pen);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
 		if (z.i >= seq->n) { // reach to the end
-			fprintf(stderr, "  ** reached the end\n");
+			if (bfc_verbose >= 4) fprintf(stderr, "  ** reached the end\n");
 			path[n_paths++] = z.k;
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
