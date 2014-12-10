@@ -155,6 +155,16 @@ static inline void bfc_kmer_append(int k, uint64_t x[4], int c)
 	x[3] = x[3]>>1 | (1ULL^c>>1) <<(k-1);
 }
 
+static inline void bfc_kmer_change(int k, uint64_t x[4], int d, int c) // d-bp from the 3'-end of k-mer; 0<=d<k
+{ // IMPORTANT: 0 <= c < 4
+	uint64_t t = ~(1ULL<<d);
+	x[0] = (uint64_t) (c&1)<<d | (x[0]&t);
+	x[1] = (uint64_t)(c>>1)<<d | (x[1]&t);
+	t = ~(1ULL<<(k-1-d));
+	x[2] = (uint64_t)(1^(c&1))<<(k-1-d) | (x[2]&t);
+	x[3] = (uint64_t)(1^ c>>1)<<(k-1-d) | (x[3]&t);
+}
+
 /* A note on multi-threading
 
    The bloom filter is always the same regardless of how many threads in use.
@@ -564,6 +574,31 @@ static void bfc_seq_revcomp(ecseq_t *seq)
 	if (seq->n&1) seq->a[i] = ecbase_comp(&seq->a[i]);
 }
 
+/****************************
+ * A few greedy ec routines *
+ ****************************/
+
+int bfc_ec_greedy_k(int k, const bfc_kmer_t x, const bfc_ch_t *ch, kchash_t *kc)
+{
+	int i, j, ori, max = 0, max_ec = -1, max2 = 0;
+	ori = bfc_kc_get(ch, kc, &x);
+	for (i = 0; i < k; ++i) {
+		int c = (x.x[1]>>i&1)<<1 | (x.x[0]>>i&1);
+		for (j = 0; j < 4; ++j) {
+			bfc_kmer_t y = x;
+			int ret;
+			if (j == c) continue;
+			bfc_kmer_change(k, y.x, i, j);
+			ret = bfc_kc_get(ch, kc, &y);
+			if (ret < 0) continue;
+			if ((max&0xff) < (ret&0xff)) max2 = max, max = ret, max_ec = i<<2 | j;
+			else if ((max2&0xff) < (ret&0xff)) max2 = ret;
+		}
+	}
+	printf("%x,%x,%x\n", ori, max, max2);
+	return max_ec;
+}
+
 /********************
  * Correct one read *
  ********************/
@@ -713,6 +748,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 			if (c->ob < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->ob);
+				//if (z.i == e->opt->k - 1) bfc_ec_greedy_k(e->opt->k, x, e->ch, e->kc);
 				os = bfc_kc_get(e->ch, e->kc, &x);
 				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq) no_others = 1;
 				if (bfc_verbose >= 4) {
