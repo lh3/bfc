@@ -306,6 +306,27 @@ uint64_t bfc_ch_count(const bfc_ch_t *ch)
 	return cnt;
 }
 
+int bfc_ch_hist(const bfc_ch_t *ch, uint64_t cnt[256])
+{
+	int i, max_i;
+	uint64_t max;
+	memset(cnt, 0, 256 * 8);
+	for (i = 0; i < 1<<ch->l_pre; ++i) {
+		khint_t k;
+		cnthash_t *h = ch->h[i];
+		for (k = 0; k != kh_end(h); ++k)
+			if (kh_exist(h, k))
+				++cnt[kh_key(h, k) & 0xff];
+	}
+	for (i = 0, max = 0; i < 256; ++i) {
+		if (cnt[i] > max)
+			max = cnt[i], max_i = i;
+		if (bfc_verbose >= 3 && i > 0)
+			fprintf(stderr, "[M::%s] %3d : %lld\n", __func__, (int)i, (long long)cnt[i]);
+	}
+	return max_i;
+}
+
 int bfc_ch_dump(const bfc_ch_t *ch, const char *fn)
 {
 	FILE *fp;
@@ -769,6 +790,7 @@ typedef struct {
 	kseq_t *ks;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
+	int mode;
 } bfc_ecaux_t;
 
 typedef struct {
@@ -825,8 +847,10 @@ int main(int argc, char *argv[])
 	gzFile fp;
 	bfc_opt_t opt;
 	bfc_cntaux_t caux;
-	int i, c, no_mt_io = 0, no_ec = 0;
+	int i, c, mode;
+	int no_mt_io = 0, no_ec = 0;
 	char *in_hash = 0, *out_hash = 0, *str_kcov = 0;
+	uint64_t hist[256];
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
@@ -887,12 +911,15 @@ int main(int argc, char *argv[])
 		caux.bf = 0;
 	} else caux.ch = bfc_ch_restore(in_hash);
 
+	mode = bfc_ch_hist(caux.ch, hist);
+
 	if (str_kcov) bfc_kc_print_kcov(caux.ch, 0, str_kcov);
 	if (out_hash) bfc_ch_dump(caux.ch, out_hash);
 
 	if (!no_ec) {
 		bfc_ecaux_t eaux;
 		eaux.opt = &opt;
+		eaux.mode = mode;
 		eaux.e = calloc(opt.n_threads, sizeof(void*));
 		for (i = 0; i < opt.n_threads; ++i)
 			eaux.e[i] = ec1buf_init(&opt, caux.ch);
