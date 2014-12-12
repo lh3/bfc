@@ -534,6 +534,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 typedef struct { // NOTE: unaligned memory
 	uint8_t b:3, ob:3, q:1, oq:1;
 	uint8_t ec:1, absent:1, diff:6;
+	uint8_t cov, is_solid:1, is_conflict:1, is_syserr:1, dummy:5;
 	int i;
 } ecbase_t;
 
@@ -574,18 +575,17 @@ static void bfc_seq_revcomp(ecseq_t *seq)
 	if (seq->n&1) seq->a[i] = ecbase_comp(&seq->a[i]);
 }
 
-/****************************
- * A few greedy ec routines *
- ****************************/
+/***************************
+ * independent ec routines *
+ ***************************/
 
-int bfc_ec_greedy_k(int k, const bfc_kmer_t x, const bfc_ch_t *ch, kchash_t *kc)
+int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch, kchash_t *kc)
 {
-	int i, j, ori, max = 0, max_ec = -1, max2 = 0;
-	ori = bfc_kc_get(ch, kc, &x);
+	int i, j, max = 0, max_ec = -1, max2 = 0;
 	for (i = 0; i < k; ++i) {
-		int c = (x.x[1]>>i&1)<<1 | (x.x[0]>>i&1);
+		int c = (x->x[1]>>i&1)<<1 | (x->x[0]>>i&1);
 		for (j = 0; j < 4; ++j) {
-			bfc_kmer_t y = x;
+			bfc_kmer_t y = *x;
 			int ret;
 			if (j == c) continue;
 			bfc_kmer_change(k, y.x, i, j);
@@ -595,8 +595,53 @@ int bfc_ec_greedy_k(int k, const bfc_kmer_t x, const bfc_ch_t *ch, kchash_t *kc)
 			else if ((max2&0xff) < (ret&0xff)) max2 = ret;
 		}
 	}
-	printf("%x,%x,%x\n", ori, max, max2);
-	return max_ec;
+	return (max&0xff) * 3 > mode && (max2&0xff) < 3? max_ec : -1;
+}
+
+int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
+{
+	int i, l;
+	*x = bfc_kmer_null;
+	for (i = start, l = 0; i < s->n; ++k) {
+		ecbase_t *c = &s->a[i];
+		if (c->b < 4) {
+			bfc_kmer_append(k, x->x, c->b);
+			if (++l == k) break;
+		} else l = 0, *x = bfc_kmer_null;
+	}
+	return i;
+}
+
+uint64_t bfc_ec_solid_pos(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *kc)
+{
+	int i, l, r, max, max_i;
+	bfc_kmer_t x = bfc_kmer_null;
+	// compute k-mer coverage
+	for (i = 0; i < s->n; ++i)
+		s->a[i].cov = s->a[i].is_solid = 0;
+	for (i = l = 0; i < s->n; ++i) {
+		ecbase_t *c = &s->a[i];
+		if (c->b < 4) {
+			bfc_kmer_append(k, x.x, c->b);
+			if (++l >= k) {
+				r = bfc_kc_get(ch, kc, &x);
+				if (r >= 0) {
+					if ((r&0xff) >= min_occ) c->is_solid = 1;
+					if ((r>>8&7) >= 2) c->is_syserr = 1;
+					if ((r>>11&7) >= 2) s->a[i+1-k].is_syserr = 1;
+				}
+			}
+		} else l = 0, x = bfc_kmer_null;
+	}
+	// find the longest solid stretch
+	for (i = k - 1, max = l = 0, max_i = -1; i < s->n; ++i) {
+		if (!s->a[i].is_solid) {
+			if (l > max) max = l, max_i = i;
+			l = 0;
+		} else ++l;
+	}
+	if (l > max) max = l, max_i = i;
+	return max > 0? (uint64_t)(max_i - k + 1) << 32 | (max_i + 1) : 0;
 }
 
 /********************
@@ -638,6 +683,7 @@ typedef struct {
 	kvec_t(echeap1_t) heap;
 	kvec_t(ecstack1_t) stack;
 	ecseq_t ori_seq, tmp, ec[2];
+	int mode;
 } bfc_ec1buf_t;
 
 #define heap_lt(a, b) ((a).tot_pen > (b).tot_pen)
@@ -707,24 +753,25 @@ static void adjust_min_diff(int diff, ecseq_t *opt, const ecseq_t *sub)
 			opt->a[i].diff = diff;
 }
 
-static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
+static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
 {
 	echeap1_t z;
 	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0;
-	assert(seq->n < 0x10000);
+	assert(seq->n < 0x10000 && end <= seq->n);
 	if (bfc_verbose >= 4) fprintf(stderr, "o bfc_ec1dir(): len:%ld\n", seq->n);
 	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
 	kv_resize(ecbase_t, *ec, seq->n);
-	for (i = 0; i < seq->n; ++i) ec->a[i] = seq->a[i];
-	for (z.i = l = 0; z.i < seq->n; ++z.i) {
-		int c = seq->a[z.i].ob;
+	for (i = 0; i < seq->n; ++i) ec->a[i] = seq->a[i], ec->a[i].b = 4;
+	for (i = start; i < end; ++i) ec->a[i] = seq->a[i];
+	for (z.i = start, l = 0; z.i < end; ++z.i) {
+		int c = seq->a[z.i].b;
 		if (c < 4) {
 			if (++l == e->opt->k) break;
 			bfc_kmer_append(e->opt->k, z.x.x, c);
 		} else l = 0, z.x = bfc_kmer_null;
 	}
-	if (z.i == seq->n) return -1;
+	assert(z.i < end); // before calling this function, there must be at least one solid k-mer
 	z.k = -1; z.ecpos_high = -1;
 	kv_push(echeap1_t, e->heap, z);
 	// exhaustive error correction
@@ -737,7 +784,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d\n",
 					z.i, e->stack.n, e->heap.n, z.tot_pen);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
-		if (z.i >= seq->n) { // reach to the end
+		if (z.i >= end) { // reach to the end
 			if (bfc_verbose >= 4) fprintf(stderr, "  ** reached the end\n");
 			path[n_paths++] = z.k;
 			if (n_paths == BFC_MAX_PATHS) break;
@@ -745,14 +792,14 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 			ecbase_t *c = &seq->a[z.i];
 			int b, os = -1, no_others = 0, other_ext = 0;
 			// test if the read extension alone is enough
-			if (c->ob < 4) { // A, C, G or T
+			if (c->b < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
-				bfc_kmer_append(e->opt->k, x.x, c->ob);
+				bfc_kmer_append(e->opt->k, x.x, c->b);
 				//if (z.i == e->opt->k - 1) bfc_ec_greedy_k(e->opt->k, x, e->ch, e->kc);
 				os = bfc_kc_get(e->ch, e->kc, &x);
 				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq) no_others = 1;
 				if (bfc_verbose >= 4) {
-					fprintf(stderr, "     Original k-mer count: %c,", "ACGTN"[c->ob]);
+					fprintf(stderr, "     Original k-mer count: %c,", "ACGTN"[c->b]);
 					if (os >= 0) fprintf(stderr, "%d:%d:%d\n", os&0xff, os>>11&7, os>>8&7);
 					else fprintf(stderr, "-1:-1:-1\n");
 				}
@@ -760,8 +807,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 			// extension
 			for (b = 0; b < 4; ++b) {
 				bfc_penalty_t pen;
-				if (no_others && b != c->ob) continue;
-				if (b != c->ob) {
+				if (no_others && b != c->b) continue;
+				if (b != c->b) {
 					int s;
 					bfc_kmer_t x = z.x;
 					if (z.ecpos_high >= 0 && z.i - z.ecpos_high < e->opt->win_multi_ec) continue;
@@ -799,22 +846,43 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec)
 	return 0;
 }
 
-void bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
+int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
-	int i, ret[2];
+	int i, ret[2], start = 0, end = 0;
+	uint64_t r;
+	kh_clear(kc, e->kc);
 	bfc_seq_conv(seq, qual, e->opt->q, &e->ori_seq);
-	ret[0] = bfc_ec1dir(e, &e->ori_seq, &e->ec[0]);
+	r = bfc_ec_solid_pos(e->opt->k, e->opt->min_cov, &e->ori_seq, e->ch, e->kc);
+	if (r == 0) { // no solid k-mer
+		bfc_kmer_t x;
+		int ec = -1;
+		while ((end = bfc_ec_first_kmer(e->opt->k, &e->ori_seq, start, &x)) < e->ori_seq.n) {
+			ec = bfc_ec_greedy_k(e->opt->k, e->mode, &x, e->ch, e->kc);
+			if (ec >= 0) break;
+			if (end + (e->opt->k>>1) >= e->ori_seq.n) break;
+			start = end - (e->opt->k>>1);
+		}
+		if (ec >= 0) {
+			e->ori_seq.a[end - 1 - (ec>>2)].b = ec&3;
+			++end; start = end - e->opt->k;
+		} else return -1; // cannot find a solid k-mer anyway
+	} else start = (r>>32) - e->opt->k + 1, end = (uint32_t)r;
+	ret[0] = bfc_ec1dir(e, &e->ori_seq, &e->ec[0], start, e->ori_seq.n);
 	bfc_seq_revcomp(&e->ori_seq);
-	ret[1] = bfc_ec1dir(e, &e->ori_seq, &e->ec[1]);
+	ret[1] = bfc_ec1dir(e, &e->ori_seq, &e->ec[1], e->ori_seq.n - end, e->ori_seq.n);
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->ori_seq);
 	for (i = 0; i < e->ori_seq.n; ++i) {
-		if (e->ec[0].a[i].b == e->ec[1].a[i].b)
-			e->ori_seq.a[i].b = e->ec[0].a[i].b;
-		else e->ori_seq.a[i].b = e->ori_seq.a[i].ob;
+		ecbase_t *c = &e->ori_seq.a[i];
+		if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b;
+		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b;
+		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) c->b = e->ec[0].a[i].b;
+		else c->b = e->ori_seq.a[i].ob, c->is_conflict = 1;
 	}
+	bfc_ec_solid_pos(e->opt->k, e->opt->min_cov, &e->ori_seq, e->ch, e->kc);
 	for (i = 0; i < e->ori_seq.n; ++i)
 		seq[i] = (e->ori_seq.a[i].b == e->ori_seq.a[i].ob? "ACGTN" : "acgtn")[e->ori_seq.a[i].b];
+	return 0;
 }
 
 /********************
@@ -826,7 +894,6 @@ typedef struct {
 	kseq_t *ks;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
-	int mode;
 } bfc_ecaux_t;
 
 typedef struct {
@@ -955,10 +1022,9 @@ int main(int argc, char *argv[])
 	if (!no_ec) {
 		bfc_ecaux_t eaux;
 		eaux.opt = &opt;
-		eaux.mode = mode;
 		eaux.e = calloc(opt.n_threads, sizeof(void*));
 		for (i = 0; i < opt.n_threads; ++i)
-			eaux.e[i] = ec1buf_init(&opt, caux.ch);
+			eaux.e[i] = ec1buf_init(&opt, caux.ch), eaux.e[i]->mode = mode;
 		fp = gzopen(argv[optind], "r");
 		eaux.ks = kseq_init(fp);
 		kt_pipeline(no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
