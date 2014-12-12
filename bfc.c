@@ -612,15 +612,13 @@ int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
 	return i;
 }
 
-uint64_t bfc_ec_solid_pos(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *kc)
+void bfc_ec_mark_solid_end(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *kc)
 {
-	int i, l, r, max, max_i;
+	int i, l, r;
 	bfc_kmer_t x = bfc_kmer_null;
-	// compute k-mer coverage
-	for (i = 0; i < s->n; ++i)
-		s->a[i].cov = s->a[i].is_solid = 0;
 	for (i = l = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
+		c->is_solid = 0;
 		if (c->b < 4) {
 			bfc_kmer_append(k, x.x, c->b);
 			if (++l >= k) {
@@ -633,7 +631,11 @@ uint64_t bfc_ec_solid_pos(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kc
 			}
 		} else l = 0, x = bfc_kmer_null;
 	}
-	// find the longest solid stretch
+}
+
+uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
+{ // IMPORTANT: call bfc_ec_mark_solid() before hand!
+	int i, l, max, max_i;
 	for (i = k - 1, max = l = 0, max_i = -1; i < s->n; ++i) {
 		if (!s->a[i].is_solid) {
 			if (l > max) max = l, max_i = i;
@@ -641,7 +643,27 @@ uint64_t bfc_ec_solid_pos(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kc
 		} else ++l;
 	}
 	if (l > max) max = l, max_i = i;
-	return max > 0? (uint64_t)(max_i - k + 1) << 32 | (max_i + 1) : 0;
+	return max > 0? (uint64_t)(max_i - k + 1) << 32 | max_i : 0;
+}
+
+void bfc_ec_solid2kcov(int k, ecseq_t *s)
+{ // IMPORTANT: call bfc_ec_mark_solid() before hand!
+	int i, j;
+	for (i = 0; i < s->n; ++i) s->a[i].cov = 0;
+	for (i = k - 1; i < s->n; ++i)
+		for (j = i - k + 1; j <= i; ++j) ++s->a[j].cov;
+}
+
+void bfc_ec_set_qual(int k, int qthres, ecseq_t *s)
+{
+	int i;
+	for (i = 0; i < s->n; ++i) {
+		ecbase_t *c = &s->a[i];
+		int q = c->oq >= qthres? 1 : 0;
+		if (c->is_syserr || c->diff <= 1) c->q = q;
+		else if (c->b == c->ob) c->q = q || c->cov == k? 1 : 0;
+		else c->q = !q && c->cov == k? 1 : 0;
+	}
 }
 
 /********************
@@ -682,7 +704,7 @@ typedef struct {
 	kchash_t *kc;
 	kvec_t(echeap1_t) heap;
 	kvec_t(ecstack1_t) stack;
-	ecseq_t ori_seq, tmp, ec[2];
+	ecseq_t seq, tmp, ec[2];
 	int mode;
 } bfc_ec1buf_t;
 
@@ -729,12 +751,12 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalt
 	ks_heapup_ec(e->heap.n, e->heap.a);
 }
 
-static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *ori_seq, ecseq_t *path)
+static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *path)
 {
 	int i;
-	kv_resize(ecbase_t, *path, ori_seq->n);
-	path->n = ori_seq->n;
-	for (i = 0; i < path->n; ++i) path->a[i] = ori_seq->a[i];
+	kv_resize(ecbase_t, *path, seq->n);
+	path->n = seq->n;
+	for (i = 0; i < path->n; ++i) path->a[i] = seq->a[i];
 	while (end >= 0) {
 		i = s[end].i;
 		path->a[i].b = s[end].b;
@@ -758,7 +780,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	echeap1_t z;
 	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0;
 	assert(seq->n < 0x10000 && end <= seq->n);
-	if (bfc_verbose >= 4) fprintf(stderr, "o bfc_ec1dir(): len:%ld\n", seq->n);
+	if (bfc_verbose >= 4) fprintf(stderr, "- bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
 	kv_resize(ecbase_t, *ec, seq->n);
@@ -851,37 +873,46 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	int i, ret[2], start = 0, end = 0;
 	uint64_t r;
 	kh_clear(kc, e->kc);
-	bfc_seq_conv(seq, qual, e->opt->q, &e->ori_seq);
-	r = bfc_ec_solid_pos(e->opt->k, e->opt->min_cov, &e->ori_seq, e->ch, e->kc);
+	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
+	bfc_ec_mark_solid_end(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+	r = bfc_ec_best_island(e->opt->k, &e->seq);
 	if (r == 0) { // no solid k-mer
 		bfc_kmer_t x;
 		int ec = -1;
-		while ((end = bfc_ec_first_kmer(e->opt->k, &e->ori_seq, start, &x)) < e->ori_seq.n) {
+		while ((end = bfc_ec_first_kmer(e->opt->k, &e->seq, start, &x)) < e->seq.n) {
 			ec = bfc_ec_greedy_k(e->opt->k, e->mode, &x, e->ch, e->kc);
 			if (ec >= 0) break;
-			if (end + (e->opt->k>>1) >= e->ori_seq.n) break;
+			if (end + (e->opt->k>>1) >= e->seq.n) break;
 			start = end - (e->opt->k>>1);
 		}
 		if (ec >= 0) {
-			e->ori_seq.a[end - 1 - (ec>>2)].b = ec&3;
+			e->seq.a[end - 1 - (ec>>2)].b = ec&3;
 			++end; start = end - e->opt->k;
 		} else return -1; // cannot find a solid k-mer anyway
 	} else start = (r>>32) - e->opt->k + 1, end = (uint32_t)r;
-	ret[0] = bfc_ec1dir(e, &e->ori_seq, &e->ec[0], start, e->ori_seq.n);
-	bfc_seq_revcomp(&e->ori_seq);
-	ret[1] = bfc_ec1dir(e, &e->ori_seq, &e->ec[1], e->ori_seq.n - end, e->ori_seq.n);
+	if (bfc_verbose >= 4)
+		fprintf(stderr, "- Longest solid island: [%d,%d)\n", start, end);
+	ret[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n);
+	bfc_seq_revcomp(&e->seq);
+	ret[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n);
 	bfc_seq_revcomp(&e->ec[1]);
-	bfc_seq_revcomp(&e->ori_seq);
-	for (i = 0; i < e->ori_seq.n; ++i) {
-		ecbase_t *c = &e->ori_seq.a[i];
-		if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b;
-		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b;
-		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) c->b = e->ec[0].a[i].b;
-		else c->b = e->ori_seq.a[i].ob, c->is_conflict = 1;
+	bfc_seq_revcomp(&e->seq);
+	for (i = 0; i < e->seq.n; ++i) {
+		ecbase_t *c = &e->seq.a[i];
+		if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b, c->diff = e->ec[0].a[i].diff;
+		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b, c->diff = e->ec[1].a[i].diff;
+		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) {
+			c->b = e->ec[0].a[i].b;
+			c->diff = e->ec[0].a[i].diff < e->ec[1].a[i].diff? e->ec[0].a[i].diff : e->ec[1].a[i].diff;
+		} else c->b = e->seq.a[i].ob, c->is_conflict = 1;
 	}
-	bfc_ec_solid_pos(e->opt->k, e->opt->min_cov, &e->ori_seq, e->ch, e->kc);
-	for (i = 0; i < e->ori_seq.n; ++i)
-		seq[i] = (e->ori_seq.a[i].b == e->ori_seq.a[i].ob? "ACGTN" : "acgtn")[e->ori_seq.a[i].b];
+	bfc_ec_mark_solid_end(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+	bfc_ec_solid2kcov(e->opt->k, &e->seq);
+	bfc_ec_set_qual(e->opt->k, e->opt->q, &e->seq);
+	for (i = 0; i < e->seq.n; ++i) {
+		seq[i] = (e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b];
+		qual[i] = "+?"[e->seq.a[i].q];
+	}
 	return 0;
 }
 
