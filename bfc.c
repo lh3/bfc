@@ -602,7 +602,7 @@ int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
 {
 	int i, l;
 	*x = bfc_kmer_null;
-	for (i = start, l = 0; i < s->n; ++k) {
+	for (i = start, l = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
 		if (c->b < 4) {
 			bfc_kmer_append(k, x->x, c->b);
@@ -625,8 +625,8 @@ void bfc_ec_mark_solid_end(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, k
 				r = bfc_kc_get(ch, kc, &x);
 				if (r >= 0) {
 					if ((r&0xff) >= min_occ) c->is_solid = 1;
-					if ((r>>8&7) >= 2) c->is_syserr = 1;
-					if ((r>>11&7) >= 2) s->a[i+1-k].is_syserr = 1;
+					if ((r>>8&7) >= 3) c->is_syserr = 1;
+					if ((r>>11&7) >= 3) s->a[i+1-k].is_syserr = 1;
 				}
 			}
 		} else l = 0, x = bfc_kmer_null;
@@ -654,15 +654,15 @@ void bfc_ec_solid2kcov(int k, ecseq_t *s)
 		for (j = i - k + 1; j <= i; ++j) ++s->a[j].cov;
 }
 
-void bfc_ec_set_qual(int k, int qthres, ecseq_t *s)
+void bfc_ec_set_qual(int k, ecseq_t *s)
 {
 	int i;
 	for (i = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
-		int q = c->oq >= qthres? 1 : 0;
-		if (c->is_syserr || c->diff <= 1) c->q = q;
-		else if (c->b == c->ob) c->q = q || c->cov == k? 1 : 0;
-		else c->q = !q && c->cov == k? 1 : 0;
+		//fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i, c->is_syserr, c->diff, c->oq, c->cov);
+		if (c->is_syserr || c->diff <= 1) c->q = c->oq;
+		else if (c->b == c->ob) c->q = c->oq || c->cov == k? 1 : 0;
+		else c->q = !c->oq && c->cov == k? 1 : 0;
 	}
 }
 
@@ -803,8 +803,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		e->heap.a[0] = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
 		if (bfc_verbose >= 4)
-			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d\n",
-					z.i, e->stack.n, e->heap.n, z.tot_pen);
+			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d base:%c\n",
+					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)]);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
 		if (z.i >= end) { // reach to the end
 			if (bfc_verbose >= 4) fprintf(stderr, "  ** reached the end\n");
@@ -886,7 +886,8 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			start = end - (e->opt->k>>1);
 		}
 		if (ec >= 0) {
-			e->seq.a[end - 1 - (ec>>2)].b = ec&3;
+			//fprintf(stderr, "%d,%d,%d=>%c\n", end, ec>>2, end - (ec>>2), "ACGT"[ec&3]);
+			e->seq.a[end - (ec>>2)].b = ec&3;
 			++end; start = end - e->opt->k;
 		} else return -1; // cannot find a solid k-mer anyway
 	} else start = (r>>32) - e->opt->k + 1, end = (uint32_t)r;
@@ -901,14 +902,14 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		ecbase_t *c = &e->seq.a[i];
 		if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b, c->diff = e->ec[0].a[i].diff;
 		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b, c->diff = e->ec[1].a[i].diff;
-		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) {
+		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) { // FIXME: when both are "N", take the original base!
 			c->b = e->ec[0].a[i].b;
 			c->diff = e->ec[0].a[i].diff < e->ec[1].a[i].diff? e->ec[0].a[i].diff : e->ec[1].a[i].diff;
 		} else c->b = e->seq.a[i].ob, c->is_conflict = 1;
 	}
 	bfc_ec_mark_solid_end(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	bfc_ec_solid2kcov(e->opt->k, &e->seq);
-	bfc_ec_set_qual(e->opt->k, e->opt->q, &e->seq);
+	bfc_ec_set_qual(e->opt->k, &e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
 		seq[i] = (e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b];
 		qual[i] = "+?"[e->seq.a[i].q];
