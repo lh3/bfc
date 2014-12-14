@@ -643,7 +643,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 		} else ++l;
 	}
 	if (l > max) max = l, max_i = i;
-	return max > 0? (uint64_t)(max_i - k + 1) << 32 | max_i : 0;
+	return max > 0? (uint64_t)(max_i - max - k + 1) << 32 | max_i : 0;
 }
 
 void bfc_ec_solid2kcov(int k, ecseq_t *s)
@@ -756,7 +756,6 @@ static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *p
 	int i;
 	kv_resize(ecbase_t, *path, seq->n);
 	path->n = seq->n;
-	for (i = 0; i < path->n; ++i) path->a[i] = seq->a[i];
 	while (end >= 0) {
 		i = s[end].i;
 		path->a[i].b = s[end].b;
@@ -780,12 +779,11 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	echeap1_t z;
 	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0;
 	assert(seq->n < 0x10000 && end <= seq->n);
-	if (bfc_verbose >= 4) fprintf(stderr, "- bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
+	if (bfc_verbose >= 4) fprintf(stderr, "* bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
 	kv_resize(ecbase_t, *ec, seq->n);
-	for (i = 0; i < seq->n; ++i) ec->a[i] = seq->a[i], ec->a[i].b = 4;
-	for (i = start; i < end; ++i) ec->a[i] = seq->a[i];
+	ec->n = seq->n;
 	for (z.i = start, l = 0; z.i < end; ++z.i) {
 		int c = seq->a[z.i].b;
 		if (c < 4) {
@@ -796,9 +794,13 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	assert(z.i < end); // before calling this function, there must be at least one solid k-mer
 	z.k = -1; z.ecpos_high = -1;
 	kv_push(echeap1_t, e->heap, z);
+	for (i = 0; i < seq->n; ++i) ec->a[i].b = start <= i && i < end? seq->a[i].b : 4;
 	// exhaustive error correction
 	while (1) {
-		if (e->heap.n == 0) return -2; // may happen when there is an uncorrectable "N"
+		if (e->heap.n == 0) { // may happen when there is an uncorrectable "N"
+			if (n_paths) break;
+			else return -2;
+		}
 		z = e->heap.a[0];
 		e->heap.a[0] = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
@@ -807,8 +809,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)]);
 		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
 		if (z.i >= end) { // reach to the end
-			if (bfc_verbose >= 4) fprintf(stderr, "  ** reached the end\n");
 			path[n_paths++] = z.k;
+			if (bfc_verbose >= 4) fprintf(stderr, "  -- reached the end: n_paths:%d\n", n_paths);
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
 			ecbase_t *c = &seq->a[z.i];
@@ -858,7 +860,11 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	// backtrack
 	if (n_paths == 0) return -3;
 	buf_backtrack(e->stack.a, path[0], seq, ec);
-	if (bfc_verbose >= 4) fprintf(stderr, "o %d path(s)\n", n_paths);
+	if (bfc_verbose >= 4) {
+		fprintf(stderr, "* %d path(s); lowest penalty: %d\n  ", n_paths, e->stack.a[path[0]].tot_pen);
+		for (i = 0; i < ec->n; ++i) fputc((seq->a[i].b == ec->a[i].b? "ACGTN":"acgtn")[ec->a[i].b], stderr);
+		fputc('\n', stderr);
+	}
 	for (i = 0; i < ec->n; ++i) ec->a[i].diff = 63;
 	for (i = 1; i < n_paths; ++i) {
 		int diff = e->stack.a[path[i]].tot_pen - e->stack.a[path[0]].tot_pen;
@@ -890,9 +896,9 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			e->seq.a[end - (ec>>2)].b = ec&3;
 			++end; start = end - e->opt->k;
 		} else return -1; // cannot find a solid k-mer anyway
-	} else start = (r>>32) - e->opt->k + 1, end = (uint32_t)r;
+	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
-		fprintf(stderr, "- Longest solid island: [%d,%d)\n", start, end);
+		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
 	ret[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n);
 	bfc_seq_revcomp(&e->seq);
 	ret[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n);
