@@ -562,7 +562,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 typedef struct { // NOTE: unaligned memory
 	uint8_t b:3, ob:3, q:1, oq:1;
 	uint8_t ec:1, absent:1, diff:6;
-	uint8_t cov, is_solid:1, is_conflict:1, is_syserr:1, dummy:5;
+	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, fixed:1, conflict:1;
 	int i;
 } ecbase_t;
 
@@ -640,22 +640,31 @@ int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
 	return i;
 }
 
-void bfc_ec_mark_solid_end(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *kc)
+void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *kc)
 {
-	int i, l, r;
+	int i, l, r, j;
 	bfc_kmer_t x = bfc_kmer_null;
 	for (i = l = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
-		c->is_solid = c->is_syserr = 0;
+		c->high_end = c->solid_end = c->lcov = c->hcov = 0;
 		if (c->b < 4) {
 			bfc_kmer_append(k, x.x, c->b);
 			if (++l >= k) {
-				r = bfc_kc_get(ch, kc, &x);
-				if (r >= 0) {
-					if ((r&0xff) >= min_occ) c->is_solid = 1;
+				if ((r = bfc_kc_get(ch, kc, &x)) >= 0) {
+					if ((r>>8&0x3f) >= min_occ+1) c->high_end = 1;
+					if ((r&0xff) >= min_occ) {
+						c->solid_end = 1;
+						for (j = i - k + 1; j <= i; ++j)
+							++c->lcov, c->hcov += c->high_end;
+					}
 				}
 			}
 		} else l = 0, x = bfc_kmer_null;
+	}
+	for (i = 0; i < s->n; ++i) {
+		ecbase_t *c = &s->a[i];
+		if (c->hcov > k>>1 || (c->q && c->lcov > k>>1))
+			c->fixed = 1;
 	}
 }
 
@@ -663,7 +672,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 { // IMPORTANT: call bfc_ec_mark_solid() before hand!
 	int i, l, max, max_i;
 	for (i = k - 1, max = l = 0, max_i = -1; i < s->n; ++i) {
-		if (!s->a[i].is_solid) {
+		if (!s->a[i].solid_end) {
 			if (l > max) max = l, max_i = i;
 			l = 0;
 		} else ++l;
@@ -672,23 +681,15 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 	return max > 0? (uint64_t)(max_i - max - k + 1) << 32 | max_i : 0;
 }
 
-void bfc_ec_solid2kcov(int k, ecseq_t *s)
-{ // IMPORTANT: call bfc_ec_mark_solid() before hand!
-	int i, j;
-	for (i = 0; i < s->n; ++i) s->a[i].cov = 0;
-	for (i = k - 1; i < s->n; ++i)
-		for (j = i - k + 1; j <= i; ++j) ++s->a[j].cov;
-}
-
 void bfc_ec_set_qual(int k, ecseq_t *s)
 {
 	int i;
 	for (i = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
 		//fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i, c->is_syserr, c->diff, c->oq, c->cov);
-		if (c->is_syserr || c->diff <= 1) c->q = c->oq;
-		else if (c->b == c->ob) c->q = c->oq || c->cov == k? 1 : 0;
-		else c->q = !c->oq && c->cov == k? 1 : 0;
+		if (c->diff <= 1) c->q = c->oq;
+		else if (c->b == c->ob) c->q = c->oq || c->lcov == k? 1 : 0;
+		else c->q = !c->oq && c->lcov == k? 1 : 0;
 	}
 }
 
@@ -840,14 +841,12 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
 			ecbase_t *c = &seq->a[z.i];
-			int b, os = -1, no_others = 0, other_ext = 0;
+			int b, os = -1, other_ext = 0;
 			// test if the read extension alone is enough
 			if (c->b < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
-				//if (z.i == e->opt->k - 1) bfc_ec_greedy_k(e->opt->k, x, e->ch, e->kc);
 				os = bfc_kc_get(e->ch, e->kc, &x);
-				if (os >= 0 && (os&0xff) >= e->opt->min_cov && c->oq) no_others = 1;
 				if (bfc_verbose >= 4) {
 					fprintf(stderr, "     Original k-mer count: %c,", "ACGTN"[c->b]);
 					if (os >= 0) fprintf(stderr, "%d:%d:%d\n", os&0xff, os>>11&7, os>>8&7);
@@ -857,7 +856,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			// extension
 			for (b = 0; b < 4; ++b) {
 				bfc_penalty_t pen;
-				if (no_others && b != c->b) continue;
+				if (c->fixed && b != c->b) continue;
 				if (b != c->b) {
 					int s;
 					bfc_kmer_t x = z.x;
@@ -879,7 +878,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					buf_update(e, &z, b, pen);
 				}
 			} // ~for(b)
-			if (no_others == 0 && other_ext == 0) ++n_failures;
+			if (c->fixed == 0 && other_ext == 0) ++n_failures;
 			if (n_failures > seq->n) break;
 		} // ~else
 	} // ~while(1)
@@ -906,7 +905,7 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	uint64_t r;
 	kh_clear(kc, e->kc);
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
-	bfc_ec_mark_solid_end(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	r = bfc_ec_best_island(e->opt->k, &e->seq);
 	if (r == 0) { // no solid k-mer
 		bfc_kmer_t x;
@@ -937,11 +936,10 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) { // FIXME: when both are "N", take the original base!
 			c->b = e->ec[0].a[i].b;
 			c->diff = e->ec[0].a[i].diff < e->ec[1].a[i].diff? e->ec[0].a[i].diff : e->ec[1].a[i].diff;
-		} else c->b = e->seq.a[i].ob, c->is_conflict = 1;
+		} else c->b = e->seq.a[i].ob, c->conflict = 1;
 	}
-	bfc_ec_mark_solid_end(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
-	bfc_ec_solid2kcov(e->opt->k, &e->seq);
-	bfc_ec_set_qual(e->opt->k, &e->seq);
+	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+//	bfc_ec_set_qual(e->opt->k, &e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
 		seq[i] = (e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b];
 		qual[i] = "+?"[e->seq.a[i].q];
@@ -1050,17 +1048,16 @@ int main(int argc, char *argv[])
 	caux.mask = (1ULL<<opt.k) - 1;
 
 	if (optind == argc) {
-		fprintf(stderr, "\n");
-		fprintf(stderr, "Usage:   bfc [options] <in.fq>\n\n");
-		fprintf(stderr, "Options: -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
-		fprintf(stderr, "         -k INT       k-mer length [%d]\n", opt.k);
-		fprintf(stderr, "         -t INT       number of threads [%d]\n", opt.n_threads);
-		fprintf(stderr, "         -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", opt.n_shift);
-		fprintf(stderr, "         -h INT       use INT hash functions for Bloom Filter [%d]\n", opt.n_hashes);
-		fprintf(stderr, "         -d FILE      dump hash table to FILE [null]\n");
-		fprintf(stderr, "         -r FILE      restore hash table from FILE [null]\n");
-		fprintf(stderr, "         -E           skip error correction\n");
-		fprintf(stderr, "\n");
+		fprintf(stderr, "Usage: bfc [options] <in.fq>\n");
+		fprintf(stderr, "Options:\n");
+		fprintf(stderr, "  -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
+		fprintf(stderr, "  -k INT       k-mer length [%d]\n", opt.k);
+		fprintf(stderr, "  -t INT       number of threads [%d]\n", opt.n_threads);
+		fprintf(stderr, "  -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", opt.n_shift);
+		fprintf(stderr, "  -h INT       use INT hash functions for Bloom Filter [%d]\n", opt.n_hashes);
+		fprintf(stderr, "  -d FILE      dump hash table to FILE [null]\n");
+		fprintf(stderr, "  -r FILE      restore hash table from FILE [null]\n");
+		fprintf(stderr, "  -E           skip error correction\n");
 		return 1;
 	}
 
