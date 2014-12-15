@@ -275,7 +275,7 @@ void bfc_ch_destroy(bfc_ch_t *ch)
 	free(ch->h); free(ch);
 }
 
-void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int low_flag)
+void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high)
 {
 	int absent;
 	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
@@ -286,12 +286,10 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int low_flag)
 			while (h->lock); // lock
 	k = kh_put(cnt, h, key, &absent);
 	if (absent) {
-		if (low_flag & 1) kh_key(h, k) |= 1<<8;
-		if (low_flag & 2) kh_key(h, k) |= 1<<11;
+		if (is_high) kh_key(h, k) |= 1<<8;
 	} else {
 		if ((kh_key(h, k) & 0xff) != 0xff) ++kh_key(h, k);
-		if ((low_flag & 1) && (kh_key(h, k) >> 8 & 7) != 7) kh_key(h, k) += 1<<8;
-		if ((low_flag & 2) && (kh_key(h, k) >> 11& 7) != 7) kh_key(h, k) += 1<<11;
+		if ((kh_key(h, k) >> 8 & 0x3f) != 0x3f) kh_key(h, k) += 1<<8;
 	}
 	__sync_lock_release(&h->lock); // unlock
 }
@@ -419,8 +417,6 @@ int bfc_kc_get(const bfc_ch_t *ch, kchash_t *kc, const bfc_kmer_t *z)
 			else p->ch = p->cl = 0, p->absent = 1;
 		} else r = p->absent? -1 : p->cl<<8 | p->ch;
 	} else r = bfc_ch_get(ch, x);
-	if (r >= 0 && flipped)
-		r = (r & 0xff) | (r>>8&7)<<11 | (r>>11&7)<<8;
 	return r;
 }
 
@@ -433,7 +429,7 @@ void bfc_kc_print_kcov(const bfc_ch_t *ch, kchash_t *kc, const char *seq)
 		if ((c = seq_nt6_table[(uint8_t)seq[i]] - 1) < 4) {
 			bfc_kmer_append(ch->k, x.x, c);
 			if (++l >= ch->k && (r = bfc_kc_get(ch, kc, &x)) >= 0)
-				fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>11&7, r>>8&7);
+				fprintf(stderr, "%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>8&0x3f);
 		} else l = 0, x = bfc_kmer_null;
 	}
 }
@@ -458,7 +454,7 @@ typedef struct {
 	bfc_cntaux_t *aux;
 } bfc_count_data_t;
 
-void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int low_flag)
+void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high)
 {
 	int k = aux->opt->k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
@@ -467,9 +463,8 @@ void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int low_flag)
 	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
-	if (t) low_flag = (low_flag&1)<<1 | (low_flag&2)>>1;
 	if (ret == aux->opt->n_hashes)
-		bfc_ch_insert(aux->ch, y, low_flag);
+		bfc_ch_insert(aux->ch, y, is_high);
 }
 
 static void worker_count(void *_data, long k, int tid)
@@ -480,19 +475,16 @@ static void worker_count(void *_data, long k, int tid)
 	const bfc_opt_t *o = aux->opt;
 	int i, l;
 	bfc_kmer_t x = bfc_kmer_null;
+	uint64_t qmer = 0;
 	for (i = l = 0; i < s->l_seq; ++i) {
 		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
 		if (c < 4) {
 			bfc_kmer_append(o->k, x.x, c);
 			if (++l >= o->k) {
-				int low_flag = 0;
-				if (s->qual) {
-					if (s->qual[i] - 33 < o->q) low_flag |= 1;
-					if (s->qual[i - o->k + 1] - 33 < o->q) low_flag |= 2;
-				}
-				bfc_kmer_insert(aux, &x, low_flag);
+				qmer = qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q);
+				bfc_kmer_insert(aux, &x, (qmer == (1ULL<<o->k) - 1));
 			}
-		} else l = 0, x = bfc_kmer_null;
+		} else l = 0, qmer = 0, x = bfc_kmer_null;
 	}
 }
 
@@ -618,15 +610,13 @@ void bfc_ec_mark_solid_end(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, k
 	bfc_kmer_t x = bfc_kmer_null;
 	for (i = l = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
-		c->is_solid = 0;
+		c->is_solid = c->is_syserr = 0;
 		if (c->b < 4) {
 			bfc_kmer_append(k, x.x, c->b);
 			if (++l >= k) {
 				r = bfc_kc_get(ch, kc, &x);
 				if (r >= 0) {
 					if ((r&0xff) >= min_occ) c->is_solid = 1;
-					if ((r>>8&7) >= 3) c->is_syserr = 1;
-					if ((r>>11&7) >= 3) s->a[i+1-k].is_syserr = 1;
 				}
 			}
 		} else l = 0, x = bfc_kmer_null;
