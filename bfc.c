@@ -321,20 +321,23 @@ uint64_t bfc_ch_count(const bfc_ch_t *ch)
 int bfc_ch_hist(const bfc_ch_t *ch, uint64_t cnt[256])
 {
 	int i, max_i;
-	uint64_t max;
+	uint64_t max, high[64];
 	memset(cnt, 0, 256 * 8);
+	memset(high, 0, 64 * 8);
 	for (i = 0; i < 1<<ch->l_pre; ++i) {
 		khint_t k;
 		cnthash_t *h = ch->h[i];
 		for (k = 0; k != kh_end(h); ++k)
 			if (kh_exist(h, k))
-				++cnt[kh_key(h, k) & 0xff];
+				++cnt[kh_key(h, k) & 0xff], ++high[kh_key(h, k)>>8 & 0x3f];
 	}
 	for (i = 0, max = 0; i < 256; ++i) {
 		if (cnt[i] > max)
 			max = cnt[i], max_i = i;
-		if (bfc_verbose >= 3 && i > 0)
-			fprintf(stderr, "[M::%s] %3d : %lld\n", __func__, (int)i, (long long)cnt[i]);
+		if (bfc_verbose >= 3 && i > 0) {
+			if (i < 64) fprintf(stderr, "[M::%s] %3d : %lld : %lld\n", __func__, (int)i, (long long)cnt[i], (long long)high[i]);
+			else fprintf(stderr, "[M::%s] %3d : %lld\n", __func__, (int)i, (long long)cnt[i]);
+		}
 	}
 	return max_i;
 }
