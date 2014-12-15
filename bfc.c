@@ -275,15 +275,18 @@ void bfc_ch_destroy(bfc_ch_t *ch)
 	free(ch->h); free(ch);
 }
 
-void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high)
+int bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high, int forced)
 {
 	int absent;
 	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
 	uint64_t key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
 	khint_t k;
-	if (__sync_lock_test_and_set(&h->lock, 1))
-		while (__sync_lock_test_and_set(&h->lock, 1))
-			while (h->lock); // lock
+	if (__sync_lock_test_and_set(&h->lock, 1)) {
+		if (forced) // then wait until the hash table is unlocked by the thread using it
+			while (__sync_lock_test_and_set(&h->lock, 1))
+				while (h->lock); // lock
+		else return -1;
+	}
 	k = kh_put(cnt, h, key, &absent);
 	if (absent) {
 		if (is_high) kh_key(h, k) |= 1<<8;
@@ -292,6 +295,7 @@ void bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high)
 		if ((kh_key(h, k) >> 8 & 0x3f) != 0x3f) kh_key(h, k) += 1<<8;
 	}
 	__sync_lock_release(&h->lock); // unlock
+	return 0;
 }
 
 int bfc_ch_get(const bfc_ch_t *ch, const uint64_t x[2])
@@ -438,7 +442,14 @@ void bfc_kc_print_kcov(const bfc_ch_t *ch, kchash_t *kc, const char *seq)
  * Other routines for counting *
  *******************************/
 
+#define CNT_BUF_SIZE 256
+
 static double bfc_real_time;
+
+typedef struct {
+	uint64_t y[2];
+	int is_high;
+} insbuf_t;
 
 typedef struct {
 	const bfc_opt_t *opt;
@@ -446,6 +457,8 @@ typedef struct {
 	kseq_t *ks;
 	bfc_bf_t *bf;
 	bfc_ch_t *ch;
+	int *n_buf;
+	insbuf_t **buf;
 } bfc_cntaux_t;
 
 typedef struct {
@@ -454,7 +467,18 @@ typedef struct {
 	bfc_cntaux_t *aux;
 } bfc_count_data_t;
 
-void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high)
+int bfc_kmer_bufclear(bfc_cntaux_t *aux, int forced, int tid)
+{
+	int i, k, r;
+	for (i = k = 0; i < aux->n_buf[tid]; ++i) {
+		r = bfc_ch_insert(aux->ch, aux->buf[tid][i].y, aux->buf[tid][i].is_high, forced);
+		if (r < 0) aux->buf[tid][k++] = aux->buf[tid][i];
+	}
+	aux->n_buf[tid] = k;
+	return k;
+}
+
+void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high, int tid)
 {
 	int k = aux->opt->k, ret;
 	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
@@ -463,8 +487,15 @@ void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high)
 	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
-	if (ret == aux->opt->n_hashes)
-		bfc_ch_insert(aux->ch, y, is_high);
+	if (ret == aux->opt->n_hashes) {
+		if (bfc_ch_insert(aux->ch, y, is_high, 0) < 0) {
+			insbuf_t *p;
+			if (bfc_kmer_bufclear(aux, 0, tid) == CNT_BUF_SIZE)
+				bfc_kmer_bufclear(aux, 1, tid);
+			p = &aux->buf[tid][aux->n_buf[tid]++];
+			p->y[0] = y[0], p->y[1] = y[1], p->is_high = is_high;
+		}
+	}
 }
 
 static void worker_count(void *_data, long k, int tid)
@@ -482,7 +513,7 @@ static void worker_count(void *_data, long k, int tid)
 			bfc_kmer_append(o->k, x.x, c);
 			if (++l >= o->k) {
 				qmer = qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q);
-				bfc_kmer_insert(aux, &x, (qmer == (1ULL<<o->k) - 1));
+				bfc_kmer_insert(aux, &x, (qmer == (1ULL<<o->k) - 1), tid);
 			}
 		} else l = 0, qmer = 0, x = bfc_kmer_null;
 	}
@@ -508,6 +539,8 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 		kt_for(aux->opt->n_threads, worker_count, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs; # distinct k-mers: %ld)\n",
 				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time, (long)bfc_ch_count(aux->ch));
+		for (i = 0; i < aux->opt->n_threads; ++i)
+			bfc_kmer_bufclear(aux, 1, i);
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
 			free(s->seq); free(s->qual); free(s->name);
@@ -1031,6 +1064,10 @@ int main(int argc, char *argv[])
 	if (in_hash == 0) {
 		caux.bf = bfc_bf_init(opt.n_shift, opt.n_hashes);
 		caux.ch = bfc_ch_init(opt.k);
+		caux.n_buf = calloc(opt.n_threads, sizeof(int));
+		caux.buf = calloc(opt.n_threads, sizeof(void*));
+		for (i = 0; i < opt.n_threads; ++i)
+			caux.buf[i] = malloc(CNT_BUF_SIZE * sizeof(insbuf_t));
 
 		fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
 		caux.ks = kseq_init(fp);
@@ -1040,6 +1077,8 @@ int main(int argc, char *argv[])
 
 		bfc_bf_destroy(caux.bf);
 		caux.bf = 0;
+		for (i = 0; i < opt.n_threads; ++i) free(caux.buf[i]);
+		free(caux.buf); free(caux.n_buf);
 	} else caux.ch = bfc_ch_restore(in_hash);
 
 	mode = bfc_ch_hist(caux.ch, hist);
