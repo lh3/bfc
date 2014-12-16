@@ -559,7 +559,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 typedef struct { // NOTE: unaligned memory
 	uint8_t b:3, ob:3, q:1, oq:1;
 	uint8_t ec:1, absent:1, diff:6;
-	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, fixed:1, conflict:1;
+	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, conflict:1, dummy:1;
 	int i;
 } ecbase_t;
 
@@ -657,10 +657,6 @@ void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *k
 				}
 			}
 		} else l = 0, x = bfc_kmer_null;
-	}
-	for (i = 0; i < s->n; ++i) {
-		ecbase_t *c = &s->a[i];
-		c->fixed = (c->hcov > k>>1 || (c->q && c->lcov > k>>1));
 	}
 }
 
@@ -825,15 +821,15 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (n_paths == BFC_MAX_PATHS) break;
 		} else {
 			ecbase_t *c = &seq->a[z.i];
-			int b, os = -1, other_ext = 0;
+			int b, os = -1, fixed = 0, other_ext = 0;
 			// test if the read extension alone is enough
-			if (bfc_verbose >= 4) fprintf(stderr, "     qual:%d fixed:%d\n", c->q, c->fixed);
 			if (c->b < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
 				os = bfc_kc_get(e->ch, e->kc, &x);
+				if (c->q && (os>>8&0x3f) >= e->opt->min_cov && c->hcov >= e->opt->min_cov) fixed = 1;
 				if (bfc_verbose >= 4) {
-					fprintf(stderr, "     Original k-mer count: %c,", "ACGTN"[c->b]);
+					fprintf(stderr, "     Original k-mer count (%s): %c,", fixed? "fixed" : "flexible", "ACGTN"[c->b]);
 					if (os >= 0) fprintf(stderr, "%d:%d\n", os&0xff, os>>8&0x3f);
 					else fprintf(stderr, "-1:-1\n");
 				}
@@ -841,7 +837,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			// extension
 			for (b = 0; b < 4; ++b) {
 				bfc_penalty_t pen;
-				if (c->fixed && b != c->b) continue;
+				if (fixed && b != c->b) continue;
 				if (b != c->b) {
 					int s;
 					bfc_kmer_t x = z.x;
@@ -863,7 +859,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					buf_update(e, &z, b, pen);
 				}
 			} // ~for(b)
-			if (c->fixed == 0 && other_ext == 0) ++n_failures;
+			if (fixed == 0 && other_ext == 0) ++n_failures;
 			if (n_failures > seq->n) break;
 		} // ~else
 	} // ~while(1)
