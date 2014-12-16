@@ -652,7 +652,7 @@ void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *k
 					if ((r&0xff) >= min_occ) {
 						c->solid_end = 1;
 						for (j = i - k + 1; j <= i; ++j)
-							++c->lcov, c->hcov += c->high_end;
+							++s->a[j].lcov, s->a[j].hcov += c->high_end;
 					}
 				}
 			}
@@ -660,8 +660,7 @@ void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *k
 	}
 	for (i = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
-		if (c->hcov > k>>1 || (c->q && c->lcov > k>>1))
-			c->fixed = 1;
+		c->fixed = (c->hcov > k>>1 || (c->q && c->lcov > k>>1));
 	}
 }
 
@@ -828,6 +827,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			ecbase_t *c = &seq->a[z.i];
 			int b, os = -1, other_ext = 0;
 			// test if the read extension alone is enough
+			if (bfc_verbose >= 4) fprintf(stderr, "     qual:%d fixed:%d\n", c->q, c->fixed);
 			if (c->b < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
@@ -926,7 +926,7 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	for (i = 0; i < e->seq.n; ++i) {
 		int is_diff = !(e->seq.a[i].b == e->seq.a[i].ob);
-		seq[i] = (is_diff? "ACGTN" : "acgtn")[e->seq.a[i].b];
+		seq[i] = (is_diff? "acgtn" : "ACGTN")[e->seq.a[i].b];
 		qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
 	}
 	return 0;
