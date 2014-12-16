@@ -829,9 +829,9 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				os = bfc_kc_get(e->ch, e->kc, &x);
 				if (c->q && (os>>8&0x3f) >= e->opt->min_cov && c->hcov >= e->opt->min_cov) fixed = 1;
 				if (bfc_verbose >= 4) {
-					fprintf(stderr, "     Original k-mer count (%s): %c,", fixed? "fixed" : "flexible", "ACGTN"[c->b]);
-					if (os >= 0) fprintf(stderr, "%d:%d\n", os&0xff, os>>8&0x3f);
-					else fprintf(stderr, "-1:-1\n");
+					fprintf(stderr, "     Original base:%c qual:%d fixed:%d count:", "ACGTN"[c->b], c->q, fixed);
+					if (os >= 0) fprintf(stderr, "%d,%d\n", os&0xff, os>>8&0x3f);
+					else fprintf(stderr, "-1,-1\n");
 				}
 			}
 			// extension
