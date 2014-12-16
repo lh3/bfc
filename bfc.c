@@ -456,7 +456,6 @@ typedef struct {
 
 typedef struct {
 	const bfc_opt_t *opt;
-	uint64_t mask;
 	kseq_t *ks;
 	bfc_bf_t *bf;
 	bfc_ch_t *ch;
@@ -1045,7 +1044,6 @@ int main(int argc, char *argv[])
 			} else if (c == 'L') opt.chunk_size = (long)x + 1;
 		}
 	}
-	caux.mask = (1ULL<<opt.k) - 1;
 
 	if (optind == argc) {
 		fprintf(stderr, "Usage: bfc [options] <in.fq>\n");
