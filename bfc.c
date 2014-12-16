@@ -241,8 +241,6 @@ typedef khash_t(cnt) cnthash_t;
 
 #define BFC_CH_KEYBITS 50
 
-#define bfc_flip_cnt(r) (((r) & 0xff) | ((r)>>8&7)<<11 | ((r)>>11&7)<<8)
-
 typedef struct {
 	int k;
 	cnthash_t **h;
@@ -680,18 +678,6 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 	return max > 0? (uint64_t)(max_i - max - k + 1) << 32 | max_i : 0;
 }
 
-void bfc_ec_set_qual(int k, ecseq_t *s)
-{
-	int i;
-	for (i = 0; i < s->n; ++i) {
-		ecbase_t *c = &s->a[i];
-		//fprintf(stderr, "%d\t%d\t%d\t%d\t%d\n", i, c->is_syserr, c->diff, c->oq, c->cov);
-		if (c->diff <= 1) c->q = c->oq;
-		else if (c->b == c->ob) c->q = c->oq || c->lcov == k? 1 : 0;
-		else c->q = !c->oq && c->lcov == k? 1 : 0;
-	}
-}
-
 /********************
  * Correct one read *
  ********************/
@@ -848,8 +834,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				os = bfc_kc_get(e->ch, e->kc, &x);
 				if (bfc_verbose >= 4) {
 					fprintf(stderr, "     Original k-mer count: %c,", "ACGTN"[c->b]);
-					if (os >= 0) fprintf(stderr, "%d:%d:%d\n", os&0xff, os>>11&7, os>>8&7);
-					else fprintf(stderr, "-1:-1:-1\n");
+					if (os >= 0) fprintf(stderr, "%d:%d\n", os&0xff, os>>8&0x3f);
+					else fprintf(stderr, "-1:-1\n");
 				}
 			}
 			// extension
@@ -864,7 +850,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_kc_get(e->ch, e->kc, &x);
 					if (bfc_verbose >= 4 && s >= 0)
-						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d:%d\n", "ACGTN"[b], s&0xff, s>>11&7, s>>8&7);
+						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d\n", "ACGTN"[b], s&0xff, s>>8&0x3f);
 					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
 					if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently good
 					pen.ec = 1, pen.ec_high = c->oq;
@@ -938,10 +924,10 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		} else c->b = e->seq.a[i].ob, c->conflict = 1;
 	}
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
-//	bfc_ec_set_qual(e->opt->k, &e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
-		seq[i] = (e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b];
-		qual[i] = "+?"[e->seq.a[i].q];
+		int is_diff = !(e->seq.a[i].b == e->seq.a[i].ob);
+		seq[i] = (is_diff? "ACGTN" : "acgtn")[e->seq.a[i].b];
+		qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
 	}
 	return 0;
 }
