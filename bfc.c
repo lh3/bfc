@@ -292,7 +292,7 @@ int bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high, int forced)
 		if (is_high) kh_key(h, k) |= 1<<8;
 	} else {
 		if ((kh_key(h, k) & 0xff) != 0xff) ++kh_key(h, k);
-		if ((kh_key(h, k) >> 8 & 0x3f) != 0x3f) kh_key(h, k) += 1<<8;
+		if (is_high && (kh_key(h, k) >> 8 & 0x3f) != 0x3f) kh_key(h, k) += 1<<8;
 	}
 	__sync_lock_release(&h->lock); // unlock
 	return 0;
@@ -509,14 +509,14 @@ static void worker_count(void *_data, long k, int tid)
 	const bfc_opt_t *o = aux->opt;
 	int i, l;
 	bfc_kmer_t x = bfc_kmer_null;
-	uint64_t qmer = 0;
+	uint64_t qmer = 0, mask = (1ULL<<o->k) - 1;
 	for (i = l = 0; i < s->l_seq; ++i) {
 		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
 		if (c < 4) {
 			bfc_kmer_append(o->k, x.x, c);
 			if (++l >= o->k) {
-				qmer = qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q);
-				bfc_kmer_insert(aux, &x, (qmer == (1ULL<<o->k) - 1), tid);
+				qmer = (qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q)) & mask;
+				bfc_kmer_insert(aux, &x, (qmer == mask), tid);
 			}
 		} else l = 0, qmer = 0, x = bfc_kmer_null;
 	}
