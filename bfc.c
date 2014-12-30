@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r62"
+#define BFC_VERSION "r63"
 
 /******************
  * Hash functions *
@@ -572,7 +572,7 @@ void *bfc_count_cb(void *shared, int step, void *_data)
 
 typedef struct { // NOTE: unaligned memory
 	uint8_t b:3, ob:3, q:1, oq:1;
-	uint8_t ec:1, absent:1, diff:6;
+	uint8_t ec:1, absent:1, dummy6:6;
 	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, conflict:1, dummy:1;
 	int i;
 } ecbase_t;
@@ -792,20 +792,11 @@ static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *p
 	}
 }
 
-static void adjust_min_diff(int diff, ecseq_t *opt, const ecseq_t *sub)
-{
-	int i;
-	diff = diff < 63? diff : 63;
-	for (i = 0; i < opt->n; ++i)
-		if (opt->a[i].b != sub->a[i].b && opt->a[i].diff < diff)
-			opt->a[i].diff = diff;
-}
-
 static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
 {
 	echeap1_t z;
 	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
-	assert(end <= seq->n);
+	assert(end <= seq->n && end - start >= e->opt->k);
 	if (bfc_verbose >= 4) fprintf(stderr, "* bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
 	memset(&z, 0, sizeof(echeap1_t));
@@ -822,10 +813,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	z.k = -1; z.ecpos_high = -1;
 	z.ecpos[0] = z.ecpos[1] = z.ecpos[2] = z.ecpos[3] = -1;
 	kv_push(echeap1_t, e->heap, z);
-	for (i = 0; i < seq->n; ++i) {
-		ec->a[i].b = start <= i && i < end? seq->a[i].b : 4;
-		ec->a[i].ob = seq->a[i].ob;
-	}
+	for (i = 0; i < seq->n; ++i) ec->a[i].b = seq->a[i].b, ec->a[i].ob = seq->a[i].ob;
 	// exhaustive error correction
 	while (1) {
 		int stop = 0;
@@ -914,18 +902,12 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	if (n_paths == 0) return -3;
 	assert(min_path >= 0 && min_path < n_paths && e->stack.a[path[min_path]].tot_pen == min_path_pen);
 	buf_backtrack(e->stack.a, path[min_path], seq, ec);
+	for (i = 0; i < ec->n; ++i) // mask out uncorrected regions
+		if (i < start + e->opt->k || i >= end) ec->a[i].b = 4;
 	if (bfc_verbose >= 4) {
 		fprintf(stderr, "* %d path(s); lowest penalty: %d\n  ", n_paths, e->stack.a[path[0]].tot_pen);
 		for (i = 0; i < ec->n; ++i) fputc((seq->a[i].b == ec->a[i].b? "ACGTN":"acgtn")[ec->a[i].b], stderr);
 		fputc('\n', stderr);
-	}
-	for (i = 0; i < ec->n; ++i) ec->a[i].diff = 63;
-	for (i = 0; i < n_paths; ++i) {
-		int diff;
-		if (i == min_path) continue;
-		diff = e->stack.a[path[i]].tot_pen - min_path_pen;
-		buf_backtrack(e->stack.a, path[i], seq, &e->tmp);
-		adjust_min_diff(diff, ec, &e->tmp);
 	}
 	return 0;
 }
@@ -961,12 +943,11 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	bfc_seq_revcomp(&e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
 		ecbase_t *c = &e->seq.a[i];
-		if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b, c->diff = e->ec[0].a[i].diff;
-		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b, c->diff = e->ec[1].a[i].diff;
-		else if (e->ec[0].a[i].b == e->ec[1].a[i].b) { // FIXME: when both are "N", take the original base!
-			c->b = e->ec[0].a[i].b;
-			c->diff = e->ec[0].a[i].diff < e->ec[1].a[i].diff? e->ec[0].a[i].diff : e->ec[1].a[i].diff;
-		} else c->b = e->seq.a[i].ob, c->conflict = 1;
+		if (e->ec[0].a[i].b == e->ec[1].a[i].b)
+			c->b = e->ec[0].a[i].b > 3? e->seq.a[i].b : e->ec[0].a[i].b;
+		else if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b;
+		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b;
+		else c->b = e->seq.a[i].ob, c->conflict = 1;
 	}
 	//bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	for (i = 0; i < e->seq.n; ++i) {
