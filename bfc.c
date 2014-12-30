@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r64"
+#define BFC_VERSION "r65"
 
 /******************
  * Hash functions *
@@ -812,7 +812,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	}
 	assert(z.i < end); // before calling this function, there must be at least one solid k-mer
 	z.k = -1; z.ecpos_high = -1;
-	z.ecpos[0] = z.ecpos[1] = z.ecpos[2] = z.ecpos[3] = -1;
+	for (i = 0; i < BFC_EC_HIST; ++i) z.ecpos[i] = -1;
 	kv_push(echeap1_t, e->heap, z);
 	for (i = 0; i < seq->n; ++i) ec->a[i].b = seq->a[i].b, ec->a[i].ob = seq->a[i].ob;
 	// exhaustive error correction
@@ -826,9 +826,9 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		e->heap.a[0] = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
 		if (bfc_verbose >= 4)
-			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d last_base:%c ecpos_high:%d ecpos:[%d,%d,%d,%d]\n",
+			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d last_base:%c ecpos_high:%d ecpos:[%d,%d,%d,%d,%d]\n",
 					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)], z.ecpos_high,
-					z.ecpos[0], z.ecpos[1], z.ecpos[2], z.ecpos[3]);
+					z.ecpos[0], z.ecpos[1], z.ecpos[2], z.ecpos[3], z.ecpos[4]);
 		if (min_path >= 0 && z.tot_pen > min_path_pen + e->opt->max_path_diff) break;
 		if (z.i - end > e->opt->max_end_ext) stop = 1;
 		if (!stop) {
@@ -881,7 +881,10 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				}
 			} // ~for(b)
 			if (fixed == 0 && other_ext == 0) ++n_failures;
-			if (n_failures > seq->n) break;
+			if (n_failures > seq->n * 2) {
+				if (bfc_verbose >= 4) fprintf(stderr, "  -- too many unsuccessful attempts\n");
+				break;
+			}
 			if (c || n_added == 1) {
 				for (b = 0; b < n_added; ++b)
 					buf_update(e, &z, added[b]);
