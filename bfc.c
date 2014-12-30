@@ -884,11 +884,15 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (c || n_added == 1) {
 				for (b = 0; b < n_added; ++b)
 					buf_update(e, &z, added[b]);
-			} else stop = 1;
+			} else {
+				if (n_added == 0)
+					e->stack.a[z.k].tot_pen += e->opt->max_end_ext - (z.i - end);
+				stop = 1;
+			}
 		} // ~if(!stop)
 		if (stop) {
 			path[n_paths++] = z.k;
-			if (bfc_verbose >= 4) fprintf(stderr, "  -- found %d path(s)\n", n_paths);
+			if (bfc_verbose >= 4) fprintf(stderr, "  -- n_paths=%d penalty=%d\n", n_paths, e->stack.a[z.k].tot_pen);
 			if (n_paths == BFC_MAX_PATHS) break;
 		}
 	} // ~while(1)
@@ -1030,7 +1034,7 @@ int main(int argc, char *argv[])
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
 	caux.opt = &opt;
-	while ((c = getopt(argc, argv, "v:Ed:k:s:b:L:t:C:h:q:Jr:")) >= 0) {
+	while ((c = getopt(argc, argv, "v:Ed:k:s:b:L:t:C:h:q:Jr:c:")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
@@ -1039,6 +1043,7 @@ int main(int argc, char *argv[])
 		else if (c == 'b') opt.n_shift = atoi(optarg);
 		else if (c == 't') opt.n_threads = atoi(optarg);
 		else if (c == 'h') opt.n_hashes = atoi(optarg);
+		else if (c == 'c') opt.min_cov = atoi(optarg);
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
 		else if (c == 'v') bfc_verbose = atoi(optarg);
@@ -1065,8 +1070,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", opt.n_shift);
 		fprintf(stderr, "  -h INT       use INT hash functions for Bloom Filter [%d]\n", opt.n_hashes);
 		fprintf(stderr, "  -d FILE      dump hash table to FILE [null]\n");
-		fprintf(stderr, "  -r FILE      restore hash table from FILE [null]\n");
 		fprintf(stderr, "  -E           skip error correction\n");
+		fprintf(stderr, "  -r FILE      restore hash table from FILE [null]\n");
+		fprintf(stderr, "  -c INT       min k-mer coverage [%d]\n", opt.min_cov);
 		return 1;
 	}
 
