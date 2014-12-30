@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r61"
+#define BFC_VERSION "r62"
 
 /******************
  * Hash functions *
@@ -912,7 +912,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	} // ~while(1)
 	// backtrack
 	if (n_paths == 0) return -3;
-	assert(min_path >= 0 && min_path < n_paths);
+	assert(min_path >= 0 && min_path < n_paths && e->stack.a[path[min_path]].tot_pen == min_path_pen);
 	buf_backtrack(e->stack.a, path[min_path], seq, ec);
 	if (bfc_verbose >= 4) {
 		fprintf(stderr, "* %d path(s); lowest penalty: %d\n  ", n_paths, e->stack.a[path[0]].tot_pen);
@@ -923,7 +923,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	for (i = 0; i < n_paths; ++i) {
 		int diff;
 		if (i == min_path) continue;
-		diff = e->stack.a[path[i]].tot_pen - e->stack.a[path[min_path]].tot_pen;
+		diff = e->stack.a[path[i]].tot_pen - min_path_pen;
 		buf_backtrack(e->stack.a, path[i], seq, &e->tmp);
 		adjust_min_diff(diff, ec, &e->tmp);
 	}
@@ -968,7 +968,7 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			c->diff = e->ec[0].a[i].diff < e->ec[1].a[i].diff? e->ec[0].a[i].diff : e->ec[1].a[i].diff;
 		} else c->b = e->seq.a[i].ob, c->conflict = 1;
 	}
-	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+	//bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	for (i = 0; i < e->seq.n; ++i) {
 		int is_diff = !(e->seq.a[i].b == e->seq.a[i].ob);
 		seq[i] = (is_diff? "acgtn" : "ACGTN")[e->seq.a[i].b];
