@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r65"
+#define BFC_VERSION "r66"
 
 /******************
  * Hash functions *
@@ -133,7 +133,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->n_hashes = 4;
 
 	opt->min_cov = 3;
-	opt->win_multi_ec = 13;
+	opt->win_multi_ec = 10;
 	opt->max_end_ext = 5;
 
 	opt->w_ec = 1;
