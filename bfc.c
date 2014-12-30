@@ -683,7 +683,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 #define BFC_MAX_PDIFF 3
 
 typedef struct {
-	uint8_t ec:1, ec_high:1, absent:1;
+	uint8_t ec:1, ec_high:1, absent:1, absent_high:1;
 } bfc_penalty_t;
 
 typedef struct {
@@ -743,7 +743,7 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, int b, bfc_penalt
 	q->i = prev->i;
 	q->b = b;
 	q->pen = pen;
-	q->tot_pen = prev->tot_pen + (int)pen.ec + pen.ec_high + pen.absent;
+	q->tot_pen = prev->tot_pen + (int)pen.ec + pen.ec_high + pen.absent + pen.absent_high;
 	// update heap
 	kv_pushp(echeap1_t, e->heap, &r);
 	r->i = prev->i + 1;
@@ -841,21 +841,23 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				if (b != c->b) {
 					int s;
 					bfc_kmer_t x = z.x;
-					if (z.ecpos_high >= 0 && z.i - z.ecpos_high < e->opt->win_multi_ec) continue;
-					if (z.i - (z.ecpos4>>48) < e->opt->win_multi_ec) continue;
+					if (z.ecpos_high >= 0 && z.i - z.ecpos_high < e->opt->win_multi_ec) continue; // no close highQ corrections
+					if (z.i - (z.ecpos4>>48) < e->opt->win_multi_ec) continue; // no clustered corrections
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_kc_get(e->ch, e->kc, &x);
 					if (bfc_verbose >= 4 && s >= 0)
 						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d\n", "ACGTN"[b], s&0xff, s>>8&0x3f);
 					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
-					if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently good
+					//if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently better than the read path
 					pen.ec = 1, pen.ec_high = c->oq;
 					pen.absent = 0;
+					pen.absent_high = ((s>>8&0xff) < e->opt->min_cov);
 					buf_update(e, &z, b, pen);
 					++other_ext;
 				} else {
 					pen.ec = pen.ec_high = 0;
 					pen.absent = (os < 0 || (os&0xff) < e->opt->min_cov);
+					pen.absent_high = (os < 0 || (os>>8&0xff) < e->opt->min_cov);
 					buf_update(e, &z, b, pen);
 				}
 			} // ~for(b)
