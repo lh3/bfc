@@ -32,10 +32,10 @@ if (last) count(last_nm, last_seg);
 buf.destroy();
 file.close();
 
-print("# reads:           " + tot_reads);
-print("# perfect reads:   " + n_perfect);
-print("# unmapped reads:  " + n_unmapped);
-print("# chimeric reads:  " + n_chimeric_reads);
-print("# chimeric events: " + n_chimeric);
-print("# error reads:     " + n_err_reads);
-print("# error bases:     " + n_err_bases);
+print("# reads:             " + tot_reads);
+print("# perfect reads:     " + n_perfect);
+print("# unmapped reads:    " + n_unmapped);
+print("# chimeric reads:    " + n_chimeric_reads);
+print("# chimeric events:   " + n_chimeric);
+print("# reads w/ base err: " + n_err_reads);
+print("# error bases:       " + n_err_bases);
