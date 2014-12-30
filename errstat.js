@@ -1,12 +1,14 @@
 var file = arguments.length? new File(arguments[0]) : new File();
 var buf = new Bytes();
+var re = /(\d+)([MIDNSH])/g;
 
-var n_err_bases = 0, n_err_reads = 0, tot_reads = 0, n_chimeric = 0, n_chimeric_reads = 0, n_unmapped = 0, n_perfect = 0;
-var last = null, last_nm = 0, last_seg = 0;
+var n_err_bases = 0, n_err_reads = 0, tot_reads = 0, n_chimeric = 0, n_chimeric_reads = 0, n_unmapped = 0, n_perfect = 0, tot_clip = 0;
+var last = null, last_nm = 0, last_seg = 0, last_clip = 0;
 
-function count(last_nm, last_seg)
+function count(last_nm, last_seg, last_clip)
 {
 	++tot_reads;
+	tot_clip += last_clip;
 	if (last_nm == 0 && last_seg == 1) ++n_perfect;
 	if (last_nm > 0) ++n_err_reads, n_err_bases += last_nm;
 	if (last_seg == 0) ++n_unmapped;
@@ -23,11 +25,14 @@ while (file.readline(buf) >= 0) {
 		nm = parseInt(m[1]);
 	var name = t[0] + '/' + (flag>>6&3);
 	if (name != last) {
-		if (last) count(last_nm, last_seg);
-		last = name, last_nm = nm, last_seg = seg;
+		if (last) count(last_nm, last_seg, last_clip);
+		last = name, last_nm = nm, last_seg = seg, last_clip = 0;
+		while ((m = re.exec(t[5])) != null)
+			if (m[2] == 'S' || m[2] == 'H')
+				last_clip += parseInt(m[1]);
 	} else last_seg += seg, last_nm += nm;
 }
-if (last) count(last_nm, last_seg);
+if (last) count(last_nm, last_seg, last_clip);
 
 buf.destroy();
 file.close();
@@ -39,3 +44,4 @@ print("# chimeric reads:    " + n_chimeric_reads);
 print("# chimeric events:   " + n_chimeric);
 print("# reads w/ base err: " + n_err_reads);
 print("# error bases:       " + n_err_bases);
+print("# clipped bases:     " + tot_clip);
