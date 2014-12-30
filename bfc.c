@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <assert.h>
 
+#define BFC_VERSION "r59"
+
 /******************
  * Hash functions *
  ******************/
@@ -1030,6 +1032,23 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
  * Main entry *
  **************/
 
+static void usage(FILE *fp, bfc_opt_t *o)
+{
+	fprintf(fp, "Usage: bfc [options] <in.fq>\n");
+	fprintf(fp, "Options:\n");
+	fprintf(fp, "  -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
+	fprintf(fp, "  -k INT       k-mer length [%d]\n", o->k);
+	fprintf(fp, "  -t INT       number of threads [%d]\n", o->n_threads);
+	fprintf(fp, "  -b INT       set Bloom filter size to pow(2,INT) bits [%d]\n", o->n_shift);
+	fprintf(fp, "  -H INT       use INT hash functions for Bloom filter [%d]\n", o->n_hashes);
+	fprintf(fp, "  -d FILE      dump hash table to FILE [null]\n");
+	fprintf(fp, "  -E           skip error correction\n");
+	fprintf(fp, "  -r FILE      restore hash table from FILE [null]\n");
+	fprintf(fp, "  -c INT       min k-mer coverage [%d]\n", o->min_cov);
+	fprintf(fp, "  -v           show version number\n");
+	fprintf(fp, "  -h           show command line help\n");
+}
+
 int main(int argc, char *argv[])
 {
 	gzFile fp;
@@ -1043,7 +1062,7 @@ int main(int argc, char *argv[])
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
 	caux.opt = &opt;
-	while ((c = getopt(argc, argv, "v:Ed:k:s:b:L:t:C:h:q:Jr:c:")) >= 0) {
+	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
@@ -1051,12 +1070,18 @@ int main(int argc, char *argv[])
 		else if (c == 'q') opt.q = atoi(optarg);
 		else if (c == 'b') opt.n_shift = atoi(optarg);
 		else if (c == 't') opt.n_threads = atoi(optarg);
-		else if (c == 'h') opt.n_hashes = atoi(optarg);
+		else if (c == 'H') opt.n_hashes = atoi(optarg);
 		else if (c == 'c') opt.min_cov = atoi(optarg);
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
-		else if (c == 'v') bfc_verbose = atoi(optarg);
-		else if (c == 'L' || c == 's') {
+		else if (c == 'V') bfc_verbose = atoi(optarg);
+		else if (c == 'h') {
+			usage(stdout, &opt);
+			return 0;
+		} else if (c == 'v') {
+			printf("%s\n", BFC_VERSION);
+			return 0;
+		} else if (c == 'L' || c == 's') {
 			double x;
 			char *p;
 			x = strtod(optarg, &p);
@@ -1071,17 +1096,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (optind == argc) {
-		fprintf(stderr, "Usage: bfc [options] <in.fq>\n");
-		fprintf(stderr, "Options:\n");
-		fprintf(stderr, "  -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
-		fprintf(stderr, "  -k INT       k-mer length [%d]\n", opt.k);
-		fprintf(stderr, "  -t INT       number of threads [%d]\n", opt.n_threads);
-		fprintf(stderr, "  -b INT       set Bloom Filter size to pow(2,INT) bits [%d]\n", opt.n_shift);
-		fprintf(stderr, "  -h INT       use INT hash functions for Bloom Filter [%d]\n", opt.n_hashes);
-		fprintf(stderr, "  -d FILE      dump hash table to FILE [null]\n");
-		fprintf(stderr, "  -E           skip error correction\n");
-		fprintf(stderr, "  -r FILE      restore hash table from FILE [null]\n");
-		fprintf(stderr, "  -c INT       min k-mer coverage [%d]\n", opt.min_cov);
+		usage(stderr, &opt);
 		return 1;
 	}
 
