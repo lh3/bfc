@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r63"
+#define BFC_VERSION "r64"
 
 /******************
  * Hash functions *
@@ -133,7 +133,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->n_hashes = 4;
 
 	opt->min_cov = 3;
-	opt->win_multi_ec = 11;
+	opt->win_multi_ec = 13;
 	opt->max_end_ext = 5;
 
 	opt->w_ec = 1;
@@ -695,6 +695,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 #include "ksort.h"
 
 #define BFC_MAX_PATHS 8
+#define BFC_EC_HIST 5
 
 typedef struct {
 	uint8_t ec:1, ec_high:1, absent:1, absent_high:1, b:4;
@@ -709,7 +710,7 @@ typedef struct {
 	int i; // base position
 	int k; // position in the stack
 	int ecpos_high; // position of the last high-qual correction
-	int ecpos[4];
+	int32_t ecpos[BFC_EC_HIST];
 	bfc_kmer_t x;
 } echeap1_t;
 
@@ -768,9 +769,9 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	r->x = prev->x;
 	r->ecpos_high = pen.ec_high? prev->i : prev->ecpos_high;
 	if (pen.ec) {
-		memcpy(r->ecpos + 1, prev->ecpos, 12);
+		memcpy(r->ecpos + 1, prev->ecpos, (BFC_EC_HIST - 1) * 4);
 		r->ecpos[0] = prev->i;
-	} else memcpy(r->ecpos, prev->ecpos, 16);
+	} else memcpy(r->ecpos, prev->ecpos, BFC_EC_HIST * 4);
 	r->tot_pen = q->tot_pen;
 	bfc_kmer_append(e->opt->k, r->x.x, b);
 	if (bfc_verbose >= 4)
@@ -856,7 +857,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					bfc_kmer_t x = z.x;
 					if (c) { // not over the end
 						if (z.ecpos_high >= 0 && z.i - z.ecpos_high < e->opt->win_multi_ec) continue; // no close highQ corrections
-						if (z.ecpos[3]   >= 0 && z.i - z.ecpos[3]   < e->opt->win_multi_ec) continue; // no clustered corrections
+						if (z.ecpos[BFC_EC_HIST-1] >= 0 && z.i - z.ecpos[BFC_EC_HIST-1] < e->opt->win_multi_ec) continue; // no clustered corrections
 					}
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_kc_get(e->ch, e->kc, &x);
@@ -1030,6 +1031,7 @@ static void usage(FILE *fp, bfc_opt_t *o)
 	fprintf(fp, "  -d FILE      dump hash table to FILE [null]\n");
 	fprintf(fp, "  -E           skip error correction\n");
 	fprintf(fp, "  -r FILE      restore hash table from FILE [null]\n");
+	fprintf(fp, "  -w INT       no more than %d ec or 2 highQ ec in INT-bp window [%d]\n", BFC_EC_HIST, o->win_multi_ec);
 	fprintf(fp, "  -c INT       min k-mer coverage [%d]\n", o->min_cov);
 	fprintf(fp, "  -v           show version number\n");
 	fprintf(fp, "  -h           show command line help\n");
@@ -1048,7 +1050,7 @@ int main(int argc, char *argv[])
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
 	caux.opt = &opt;
-	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:")) >= 0) {
+	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
@@ -1058,6 +1060,7 @@ int main(int argc, char *argv[])
 		else if (c == 't') opt.n_threads = atoi(optarg);
 		else if (c == 'H') opt.n_hashes = atoi(optarg);
 		else if (c == 'c') opt.min_cov = atoi(optarg);
+		else if (c == 'w') opt.win_multi_ec = atoi(optarg);
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
 		else if (c == 'V') bfc_verbose = atoi(optarg);
