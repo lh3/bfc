@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <assert.h>
 
-#define BFC_VERSION "r59"
+#define BFC_VERSION "r60"
 
 /******************
  * Hash functions *
@@ -1144,6 +1144,7 @@ int main(int argc, char *argv[])
 	bfc_ch_destroy(caux.ch);
 
 	fprintf(stderr, "[M::%s] CMD:", __func__);
+	fprintf(stderr, "[M::%s] Version: %s\n", __func__, BFC_VERSION);
 	for (i = 0; i < argc; ++i)
 		fprintf(stderr, " %s", argv[i]);
 	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - bfc_real_time, cputime());
