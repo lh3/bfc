@@ -114,6 +114,9 @@ typedef struct {
 	int min_cov; // a k-mer is considered solid if the count is no less than this
 	int win_multi_ec; // no 2 high-qual corrections or 4 corrections in a window of this size
 	int max_end_ext;
+
+	int w_ec, w_ec_high, w_absent, w_absent_high;
+	int max_path_diff;
 } bfc_opt_t;
 
 void bfc_opt_init(bfc_opt_t *opt)
@@ -129,6 +132,12 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->min_cov = 3;
 	opt->win_multi_ec = 11;
 	opt->max_end_ext = 5;
+
+	opt->w_ec = 1;
+	opt->w_ec_high = 7;
+	opt->w_absent = 3;
+	opt->w_absent_high = 1;
+	opt->max_path_diff = 15;
 }
 
 void bfc_opt_by_size(bfc_opt_t *opt, long size)
@@ -683,7 +692,6 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 #include "ksort.h"
 
 #define BFC_MAX_PATHS 8
-#define BFC_MAX_PDIFF 5
 
 typedef struct {
 	uint8_t ec:1, ec_high:1, absent:1, absent_high:1, b:4;
@@ -741,6 +749,7 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 {
 	ecstack1_t *q;
 	echeap1_t *r;
+	const bfc_opt_t *o = e->opt;
 	int b = pen.b;
 	// update stack
 	kv_pushp(ecstack1_t, e->stack, &q);
@@ -748,7 +757,7 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	q->i = prev->i;
 	q->b = b;
 	q->pen = pen;
-	q->tot_pen = prev->tot_pen + (int)pen.ec + pen.ec_high + pen.absent + pen.absent_high;
+	q->tot_pen = prev->tot_pen + o->w_ec * pen.ec + o->w_ec_high * pen.ec_high + o->w_absent * pen.absent + o->w_absent_high * pen.absent_high;
 	// update heap
 	kv_pushp(echeap1_t, e->heap, &r);
 	r->i = prev->i + 1;
@@ -828,7 +837,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d last_base:%c ecpos_high:%d ecpos:[%d,%d,%d,%d]\n",
 					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)], z.ecpos_high,
 					z.ecpos[0], z.ecpos[1], z.ecpos[2], z.ecpos[3]);
-		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + BFC_MAX_PDIFF) break;
+		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + e->opt->max_path_diff) break;
 		if (z.i - end > e->opt->max_end_ext) stop = 1;
 		if (!stop) {
 			ecbase_t *c = z.i < seq->n? &seq->a[z.i] : 0;
@@ -886,7 +895,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					buf_update(e, &z, added[b]);
 			} else {
 				if (n_added == 0)
-					e->stack.a[z.k].tot_pen += e->opt->max_end_ext - (z.i - end);
+					e->stack.a[z.k].tot_pen += e->opt->w_absent * (e->opt->max_end_ext - (z.i - end));
 				stop = 1;
 			}
 		} // ~if(!stop)
