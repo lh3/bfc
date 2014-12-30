@@ -128,7 +128,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 
 	opt->min_cov = 3;
 	opt->win_multi_ec = 11;
-	opt->max_end_ext = 3;
+	opt->max_end_ext = 5;
 }
 
 void bfc_opt_by_size(bfc_opt_t *opt, long size)
@@ -683,7 +683,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 #include "ksort.h"
 
 #define BFC_MAX_PATHS 8
-#define BFC_MAX_PDIFF 3
+#define BFC_MAX_PDIFF 5
 
 typedef struct {
 	uint8_t ec:1, ec_high:1, absent:1, absent_high:1, b:4;
