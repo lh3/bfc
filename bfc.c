@@ -3,8 +3,9 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <assert.h>
+#include <limits.h>
 
-#define BFC_VERSION "r60"
+#define BFC_VERSION "r61"
 
 /******************
  * Hash functions *
@@ -803,7 +804,7 @@ static void adjust_min_diff(int diff, ecseq_t *opt, const ecseq_t *sub)
 static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
 {
 	echeap1_t z;
-	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0;
+	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
 	assert(end <= seq->n);
 	if (bfc_verbose >= 4) fprintf(stderr, "* bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
@@ -839,7 +840,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d last_base:%c ecpos_high:%d ecpos:[%d,%d,%d,%d]\n",
 					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)], z.ecpos_high,
 					z.ecpos[0], z.ecpos[1], z.ecpos[2], z.ecpos[3]);
-		if (n_paths && z.tot_pen > e->stack.a[path[0]].tot_pen + e->opt->max_path_diff) break;
+		if (min_path >= 0 && z.tot_pen > min_path_pen + e->opt->max_path_diff) break;
 		if (z.i - end > e->opt->max_end_ext) stop = 1;
 		if (!stop) {
 			ecbase_t *c = z.i < seq->n? &seq->a[z.i] : 0;
@@ -902,6 +903,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			}
 		} // ~if(!stop)
 		if (stop) {
+			if (e->stack.a[z.k].tot_pen < min_path_pen)
+				min_path_pen = e->stack.a[z.k].tot_pen, min_path = n_paths;
 			path[n_paths++] = z.k;
 			if (bfc_verbose >= 4) fprintf(stderr, "  -- n_paths=%d penalty=%d\n", n_paths, e->stack.a[z.k].tot_pen);
 			if (n_paths == BFC_MAX_PATHS) break;
@@ -909,15 +912,18 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	} // ~while(1)
 	// backtrack
 	if (n_paths == 0) return -3;
-	buf_backtrack(e->stack.a, path[0], seq, ec);
+	assert(min_path >= 0 && min_path < n_paths);
+	buf_backtrack(e->stack.a, path[min_path], seq, ec);
 	if (bfc_verbose >= 4) {
 		fprintf(stderr, "* %d path(s); lowest penalty: %d\n  ", n_paths, e->stack.a[path[0]].tot_pen);
 		for (i = 0; i < ec->n; ++i) fputc((seq->a[i].b == ec->a[i].b? "ACGTN":"acgtn")[ec->a[i].b], stderr);
 		fputc('\n', stderr);
 	}
 	for (i = 0; i < ec->n; ++i) ec->a[i].diff = 63;
-	for (i = 1; i < n_paths; ++i) {
-		int diff = e->stack.a[path[i]].tot_pen - e->stack.a[path[0]].tot_pen;
+	for (i = 0; i < n_paths; ++i) {
+		int diff;
+		if (i == min_path) continue;
+		diff = e->stack.a[path[i]].tot_pen - e->stack.a[path[min_path]].tot_pen;
 		buf_backtrack(e->stack.a, path[i], seq, &e->tmp);
 		adjust_min_diff(diff, ec, &e->tmp);
 	}
@@ -942,7 +948,6 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			start = end - (e->opt->k>>1);
 		}
 		if (ec >= 0) {
-			//fprintf(stderr, "%d,%d,%d=>%c\n", end, ec>>2, end - (ec>>2), "ACGT"[ec&3]);
 			e->seq.a[end - (ec>>2)].b = ec&3;
 			++end; start = end - e->opt->k;
 		} else return -1; // cannot find a solid k-mer anyway
