@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r66"
+#define BFC_VERSION "r67"
 
 /******************
  * Hash functions *
@@ -841,7 +841,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
 				os = bfc_kc_get(e->ch, e->kc, &x);
-				if (c->q && (os>>8&0x3f) >= e->opt->min_cov && c->hcov >= e->opt->min_cov) fixed = 1;
+				if (c->q && (os&0xff) >= e->opt->min_cov && c->lcov >= e->opt->min_cov) fixed = 1;
 				if (bfc_verbose >= 4) {
 					fprintf(stderr, "     Original base:%c qual:%d fixed:%d count:", "ACGTN"[c->b], c->q, fixed);
 					if (os >= 0) fprintf(stderr, "%d,%d\n", os&0xff, os>>8&0x3f);
