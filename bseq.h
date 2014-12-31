@@ -1,6 +1,8 @@
 #ifndef BFC_BSEQ_H
 #define BFC_BSEQ_H
 
+#include <stdint.h>
+
 struct bseq_file_s;
 typedef struct bseq_file_s bseq_file_t;
 
