@@ -5,25 +5,9 @@
 #include <assert.h>
 #include <limits.h>
 #include "bbf.h"
+#include "htab.h"
 
-#define BFC_VERSION "r72"
-
-/******************
- * Hash functions *
- ******************/
-
-// Thomas Wang's integer hash functions. See <https://gist.github.com/lh3/59882d6b96166dfc3d8d> for a snapshot.
-static inline uint64_t bfc_hash_64(uint64_t key, uint64_t mask)
-{
-	key = (~key + (key << 21)) & mask; // key = (key << 21) - key - 1;
-	key = key ^ key >> 24;
-	key = ((key + (key << 3)) + (key << 8)) & mask; // key * 265
-	key = key ^ key >> 14;
-	key = ((key + (key << 2)) + (key << 4)) & mask; // key * 21
-	key = key ^ key >> 28;
-	key = (key + (key << 31)) & mask;
-	return key;
-}
+#define BFC_VERSION "r74"
 
 /****************
  * Sequence I/O *
@@ -74,33 +58,12 @@ bseq1_t *bseq_read(kseq_t *ks, int chunk_size, int *n_)
 		s->seq = strdup(ks->seq.s);
 		s->qual = ks->qual.l? strdup(ks->qual.s) : 0;
 		s->l_seq = ks->seq.l;
+		s->aux = 0;
 		size += seqs[n++].l_seq;
 		if (size >= chunk_size) break;
 	}
 	*n_ = n;
 	return seqs;
-}
-
-/**********
- * Timers *
- **********/
-
-#include <sys/resource.h>
-#include <sys/time.h>
-
-double cputime()
-{
-	struct rusage r;
-	getrusage(RUSAGE_SELF, &r);
-	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
-}
-
-double realtime()
-{
-	struct timeval tp;
-	struct timezone tzp;
-	gettimeofday(&tp, &tzp);
-	return tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
 /*****************
@@ -154,34 +117,9 @@ void bfc_opt_by_size(bfc_opt_t *opt, long size)
 	opt->n_shift = opt->k;
 }
 
-/**********************
- * Basic k-mer update *
- **********************/
-
-typedef struct {
-	uint64_t x[4];
-} bfc_kmer_t;
-
-static bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
-
-static inline void bfc_kmer_append(int k, uint64_t x[4], int c)
-{ // IMPORTANT: 0 <= c < 4
-	uint64_t mask = (1ULL<<k) - 1;
-	x[0] = (x[0]<<1 | (c&1))  & mask;
-	x[1] = (x[1]<<1 | (c>>1)) & mask;
-	x[2] = x[2]>>1 | (1ULL^(c&1))<<(k-1);
-	x[3] = x[3]>>1 | (1ULL^c>>1) <<(k-1);
-}
-
-static inline void bfc_kmer_change(int k, uint64_t x[4], int d, int c) // d-bp from the 3'-end of k-mer; 0<=d<k
-{ // IMPORTANT: 0 <= c < 4
-	uint64_t t = ~(1ULL<<d);
-	x[0] = (uint64_t) (c&1)<<d | (x[0]&t);
-	x[1] = (uint64_t)(c>>1)<<d | (x[1]&t);
-	t = ~(1ULL<<(k-1-d));
-	x[2] = (uint64_t)(1^(c&1))<<(k-1-d) | (x[2]&t);
-	x[3] = (uint64_t)(1^ c>>1)<<(k-1-d) | (x[3]&t);
-}
+/*******************************
+ * Other routines for counting *
+ *******************************/
 
 /* A note on multi-threading
 
@@ -194,220 +132,7 @@ static inline void bfc_kmer_change(int k, uint64_t x[4], int d, int c) // d-bp f
    the hash table depends on the order of input.
 */
 
-/**************
- * Hash table *
- **************/
-
-#include "khash.h"
-
-#define _cnt_eq(a, b) ((a)>>14 == (b)>>14)
-#define _cnt_hash(a) ((a)>>14)
-KHASH_INIT(cnt, uint64_t, char, 0, _cnt_hash, _cnt_eq)
-typedef khash_t(cnt) cnthash_t;
-
-#define BFC_CH_KEYBITS 50
-
-typedef struct {
-	int k;
-	cnthash_t **h;
-	// private
-	int l_pre;
-} bfc_ch_t;
-
-bfc_ch_t *bfc_ch_init(int k)
-{
-	bfc_ch_t *ch;
-	int i;
-	if (k < 2) return 0;
-	ch = calloc(1, sizeof(bfc_ch_t));
-	ch->k = k;
-	ch->l_pre = k*2 - BFC_CH_KEYBITS; // TODO: this should be improved!!!
-	if (ch->l_pre < 1) ch->l_pre = 1;
-	if (ch->l_pre > k - 1) ch->l_pre = k - 1;
-	ch->h = calloc(1<<ch->l_pre, sizeof(void*));
-	for (i = 0; i < 1<<ch->l_pre; ++i)
-		ch->h[i] = kh_init(cnt);
-	return ch;
-}
-
-void bfc_ch_destroy(bfc_ch_t *ch)
-{
-	int i;
-	if (ch == 0) return;
-	for (i = 0; i < 1<<ch->l_pre; ++i)
-		kh_destroy(cnt, ch->h[i]);
-	free(ch->h); free(ch);
-}
-
-int bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high, int forced)
-{
-	int absent;
-	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
-	uint64_t key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
-	khint_t k;
-	if (__sync_lock_test_and_set(&h->lock, 1)) {
-		if (forced) // then wait until the hash table is unlocked by the thread using it
-			while (__sync_lock_test_and_set(&h->lock, 1))
-				while (h->lock); // lock
-		else return -1;
-	}
-	k = kh_put(cnt, h, key, &absent);
-	if (absent) {
-		if (is_high) kh_key(h, k) |= 1<<8;
-	} else {
-		if ((kh_key(h, k) & 0xff) != 0xff) ++kh_key(h, k);
-		if (is_high && (kh_key(h, k) >> 8 & 0x3f) != 0x3f) kh_key(h, k) += 1<<8;
-	}
-	__sync_lock_release(&h->lock); // unlock
-	return 0;
-}
-
-int bfc_ch_get(const bfc_ch_t *ch, const uint64_t x[2])
-{
-	uint64_t key;
-	cnthash_t *h;
-	khint_t itr;
-	h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
-	key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
-	itr = kh_get(cnt, h, key);
-	return itr == kh_end(h)? -1 : kh_key(h, itr) & 0x3fff;
-}
-
-uint64_t bfc_ch_count(const bfc_ch_t *ch)
-{
-	int i;
-	uint64_t cnt = 0;
-	for (i = 0; i < 1<<ch->l_pre; ++i)
-		cnt += kh_size(ch->h[i]);
-	return cnt;
-}
-
-int bfc_ch_hist(const bfc_ch_t *ch, uint64_t cnt[256])
-{
-	int i, max_i = -1;
-	uint64_t max, high[64];
-	memset(cnt, 0, 256 * 8);
-	memset(high, 0, 64 * 8);
-	for (i = 0; i < 1<<ch->l_pre; ++i) {
-		khint_t k;
-		cnthash_t *h = ch->h[i];
-		for (k = 0; k != kh_end(h); ++k)
-			if (kh_exist(h, k))
-				++cnt[kh_key(h, k) & 0xff], ++high[kh_key(h, k)>>8 & 0x3f];
-	}
-	for (i = 0, max = 0; i < 256; ++i) {
-		if (cnt[i] > max)
-			max = cnt[i], max_i = i;
-		if (bfc_verbose >= 3 && i > 0) {
-			if (i < 64) fprintf(stderr, "[M::%s] %3d : %lld : %lld\n", __func__, (int)i, (long long)cnt[i], (long long)high[i]);
-			else fprintf(stderr, "[M::%s] %3d : %lld\n", __func__, (int)i, (long long)cnt[i]);
-		}
-	}
-	return max_i;
-}
-
-int bfc_ch_dump(const bfc_ch_t *ch, const char *fn)
-{
-	FILE *fp;
-	uint32_t t[2];
-	int i;
-	if ((fp = strcmp(fn, "-")? fopen(fn, "wb") : stdout) == 0) return -1;
-	t[0] = ch->k, t[1] = ch->l_pre;
-	fwrite(t, 4, 2, fp);
-	for (i = 0; i < 1<<ch->l_pre; ++i) {
-		cnthash_t *h = ch->h[i];
-		khint_t k;
-		t[0] = kh_n_buckets(h), t[1] = kh_size(h);
-		fwrite(t, 4, 2, fp);
-		for (k = 0; k < kh_end(h); ++k)
-			if (kh_exist(h, k))
-				fwrite(&kh_key(h, k), 8, 1, fp);
-	}
-	fprintf(stderr, "[M::%s] dumpped the hash table to file '%s'.\n", __func__, fn);
-	fclose(fp);
-	return 0;
-}
-
-bfc_ch_t *bfc_ch_restore(const char *fn)
-{
-	FILE *fp;
-	uint32_t t[2];
-	int i, j, absent;
-	bfc_ch_t *ch;
-
-	if ((fp = fopen(fn, "rb")) == 0) return 0;
-	fread(t, 4, 2, fp);
-	ch = bfc_ch_init(t[0]);
-	assert((int)t[1] == ch->l_pre);
-	for (i = 0; i < 1<<ch->l_pre; ++i) {
-		cnthash_t *h = ch->h[i];
-		fread(t, 4, 2, fp);
-		kh_resize(cnt, h, t[0]);
-		for (j = 0; j < t[1]; ++j) {
-			uint64_t key;
-			fread(&key, 8, 1, fp);
-			kh_put(cnt, h, key, &absent);
-			assert(absent);
-		}
-	}
-	fclose(fp);
-	fprintf(stderr, "[M::%s] restored the hash table to file '%s'.\n", __func__, fn);
-	return ch;
-}
-
-/**************
- * Cache hash *
- **************/
-
-typedef struct {
-	uint64_t h0:56, ch:8;
-	uint64_t h1:56, cl:6, absent:2;
-} bfc_kcelem_t;
-
-#define kc_hash(a) ((a).h0 + (a).h1)
-#define kc_equal(a, b) ((a).h0 == (b).h0 && (a).h1 == (b).h1)
-KHASH_INIT(kc, bfc_kcelem_t, char, 0, kc_hash, kc_equal)
-typedef khash_t(kc) bfc_kc_t;
-
-int bfc_kc_get(const bfc_ch_t *ch, bfc_kc_t *kc, const bfc_kmer_t *z)
-{
-	int r, flipped = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
-	uint64_t x[2], mask = (1ULL<<ch->k) - 1;
-	x[0] = bfc_hash_64(z->x[flipped<<1|0], mask);
-	x[1] = bfc_hash_64(z->x[flipped<<1|1], mask);
-	if (kc) {
-		khint_t k;
-		int absent;
-		bfc_kcelem_t key, *p;
-		key.h0 = x[0], key.h1 = x[1];
-		k = kh_put(kc, kc, key, &absent);
-		p = &kh_key(kc, k);
-		if (absent) {
-			r = bfc_ch_get(ch, x);
-			if (r >= 0) p->ch = r&0xff, p->cl = r>>8&0x3f, p->absent = 0;
-			else p->ch = p->cl = 0, p->absent = 1;
-		} else r = p->absent? -1 : p->cl<<8 | p->ch;
-	} else r = bfc_ch_get(ch, x);
-	return r;
-}
-
-void bfc_kc_print_kcov(const bfc_ch_t *ch, bfc_kc_t *kc, const char *seq)
-{
-	int len, i, l, r, c;
-	len = strlen(seq);
-	bfc_kmer_t x = bfc_kmer_null;
-	for (i = l = 0; i < len; ++i) {
-		if ((c = seq_nt6_table[(uint8_t)seq[i]] - 1) < 4) {
-			bfc_kmer_append(ch->k, x.x, c);
-			if (++l >= ch->k && (r = bfc_kc_get(ch, kc, &x)) >= 0)
-				fprintf(stderr, "%d\t%d\t%d\t%d\n", i - ch->k + 1, i + 1, r&0xff, r>>8&0x3f);
-		} else l = 0, x = bfc_kmer_null;
-	}
-}
-
-/*******************************
- * Other routines for counting *
- *******************************/
+const bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
 
 #define CNT_BUF_SIZE 256
 
@@ -487,6 +212,8 @@ static void worker_count(void *_data, long k, int tid)
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+double cputime(void);
+double realtime(void);
 
 void *bfc_count_cb(void *shared, int step, void *_data)
 {
@@ -690,13 +417,13 @@ static bfc_ec1buf_t *ec1buf_init(const bfc_opt_t *opt, bfc_ch_t *ch)
 	bfc_ec1buf_t *e;
 	e = calloc(1, sizeof(bfc_ec1buf_t));
 	e->opt = opt, e->ch = ch;
-	e->kc = kh_init(kc);
+	e->kc = bfc_kc_init();
 	return e;
 }
 
 static void ec1buf_destroy(bfc_ec1buf_t *e)
 {	
-	kh_destroy(kc, e->kc);
+	bfc_kc_destroy(e->kc);
 	free(e->heap.a); free(e->stack.a); free(e->seq.a); free(e->tmp.a); free(e->ec[0].a); free(e->ec[1].a);
 	free(e);
 }
@@ -878,7 +605,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	uint64_t r;
 	ecstat_t s;
 
-	kh_clear(kc, e->kc);
+	bfc_kc_clear(e->kc);
 	s.failed = 1, s.n_ec = 0, s.n_ec_high = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
@@ -1025,15 +752,14 @@ int main(int argc, char *argv[])
 	bfc_cntaux_t caux;
 	int i, c, mode;
 	int no_mt_io = 0, no_ec = 0;
-	char *in_hash = 0, *out_hash = 0, *str_kcov = 0;
-	uint64_t hist[256];
+	char *in_hash = 0, *out_hash = 0;
+	uint64_t hist[256], hist_high[64];
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
 	caux.opt = &opt;
 	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
-		else if (c == 'C') str_kcov = optarg;
 		else if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
 		else if (c == 'q') opt.q = atoi(optarg);
@@ -1091,9 +817,8 @@ int main(int argc, char *argv[])
 		free(caux.buf); free(caux.n_buf);
 	} else caux.ch = bfc_ch_restore(in_hash);
 
-	mode = bfc_ch_hist(caux.ch, hist);
+	mode = bfc_ch_hist(caux.ch, hist, hist_high);
 
-	if (str_kcov) bfc_kc_print_kcov(caux.ch, 0, str_kcov);
 	if (out_hash) bfc_ch_dump(caux.ch, out_hash);
 
 	if (!no_ec) {

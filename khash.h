@@ -180,7 +180,7 @@ typedef khint_t khiter_t;
 #endif
 
 #define __KHASH_TYPE(name, khkey_t, khval_t) \
-	typedef struct { \
+	typedef struct kh_##name##_s { \
 		khint_t n_buckets, size, n_occupied; \
 		volatile int lock; \
 		khint32_t *flags; \
