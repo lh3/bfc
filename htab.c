@@ -150,7 +150,7 @@ bfc_ch_t *bfc_ch_restore(const char *fn)
 		}
 	}
 	fclose(fp);
-	fprintf(stderr, "[M::%s] restored the hash table to file '%s'.\n", __func__, fn);
+	fprintf(stderr, "[M::%s] restored the hash table from file '%s'.\n", __func__, fn);
 	return ch;
 }
 
@@ -169,10 +169,9 @@ void bfc_kc_clear(bfc_kc_t *kc) { kh_clear(kc, kc); }
 
 int bfc_kc_get(const bfc_ch_t *ch, bfc_kc_t *kc, const bfc_kmer_t *z)
 {
-	int r, flipped = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
-	uint64_t x[2], mask = (1ULL<<ch->k) - 1;
-	x[0] = bfc_hash_64(z->x[flipped<<1|0], mask);
-	x[1] = bfc_hash_64(z->x[flipped<<1|1], mask);
+	int r;
+	uint64_t x[2];
+	bfc_kmer_hash(ch->k, z->x, x);
 	if (kc) {
 		khint_t k;
 		int absent;

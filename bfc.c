@@ -9,7 +9,7 @@
 #include "htab.h"
 #include "bseq.h"
 
-#define BFC_VERSION "r77"
+#define BFC_VERSION "r79"
 
 /*****************
  * Configuration *
@@ -119,11 +119,8 @@ int bfc_kmer_bufclear(bfc_cntaux_t *aux, int forced, int tid)
 void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high, int tid)
 {
 	int k = aux->opt->k, ret;
-	int t = !(x->x[0] + x->x[1] < x->x[2] + x->x[3]);
-	uint64_t mask = (1ULL<<k) - 1, y[2], hash;
-	y[0] = bfc_hash_64(x->x[t<<1|0], mask);
-	y[1] = bfc_hash_64(x->x[t<<1|1], mask);
-	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
+	uint64_t y[2], hash;
+	hash = bfc_kmer_hash(k, x->x, y);
 	ret = bfc_bf_insert(aux->bf, hash);
 	if (ret == aux->opt->n_hashes) {
 		if (aux->ch && bfc_ch_insert(aux->ch, y, is_high, 0) < 0) { // counting with a hash table
