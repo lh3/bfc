@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <limits.h>
+#include "bbf.h"
 
 #define BFC_VERSION "r72"
 
@@ -193,58 +194,6 @@ static inline void bfc_kmer_change(int k, uint64_t x[4], int d, int c) // d-bp f
    the hash table depends on the order of input.
 */
 
-/************************
- * Blocked Bloom Filter *
- ************************/
-
-#define BFC_BLK_SHIFT  9 // 64 bytes, the size of a cache line
-#define BFC_BLK_MASK   ((1<<(BFC_BLK_SHIFT)) - 1)
-
-typedef struct {
-	int n_shift, n_hashes;
-	uint8_t *b;
-} bfc_bf_t;
-
-bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes)
-{
-	bfc_bf_t *b;
-	if (n_shift + BFC_BLK_SHIFT > 64 || n_shift < BFC_BLK_SHIFT) return 0;
-	b = calloc(1, sizeof(bfc_bf_t));
-	b->n_shift = n_shift;
-	b->n_hashes = n_hashes;
-	posix_memalign((void**)&b->b, 1<<(BFC_BLK_SHIFT-3), 1ULL<<(n_shift-3));
-	bzero(b->b, 1ULL<<(n_shift-3));
-	return b;
-}
-
-void bfc_bf_destroy(bfc_bf_t *b)
-{
-	if (b == 0) return;
-	free(b->b); free(b);
-}
-
-int bfc_bf_insert(bfc_bf_t *b, uint64_t hash)
-{
-	int x = b->n_shift - BFC_BLK_SHIFT;
-	uint64_t y = hash & ((1ULL<<x) - 1);
-	int h1 = hash >> x & BFC_BLK_MASK;
-	int h2 = hash >> b->n_shift & BFC_BLK_MASK;
-	uint8_t *p = &b->b[y<<(BFC_BLK_SHIFT-3)];
-	int i, z = h1, cnt = 0;
-	if ((h2&31) == 0) h2 = (h2 + 1) & BFC_BLK_MASK; // otherwise we may repeatedly use a few bits
-	while (__sync_lock_test_and_set(p, 1)); // lock
-	for (i = 0; i < b->n_hashes; z = (z + h2) & BFC_BLK_MASK) {
-		uint8_t *q = &p[z>>3], u;
-		if (p == q) continue; // don't use the first byte. It is a spin lock.
-		u = 1ULL<<(z&7);
-		cnt += !!(*q & u);
-		*q |= u;
-		++i;
-	}
-	__sync_lock_release(p); // unlock
-	return cnt;
-}
-
 /**************
  * Hash table *
  **************/
@@ -418,9 +367,9 @@ typedef struct {
 #define kc_hash(a) ((a).h0 + (a).h1)
 #define kc_equal(a, b) ((a).h0 == (b).h0 && (a).h1 == (b).h1)
 KHASH_INIT(kc, bfc_kcelem_t, char, 0, kc_hash, kc_equal)
-typedef khash_t(kc) kchash_t;
+typedef khash_t(kc) bfc_kc_t;
 
-int bfc_kc_get(const bfc_ch_t *ch, kchash_t *kc, const bfc_kmer_t *z)
+int bfc_kc_get(const bfc_ch_t *ch, bfc_kc_t *kc, const bfc_kmer_t *z)
 {
 	int r, flipped = !(z->x[0] + z->x[1] < z->x[2] + z->x[3]);
 	uint64_t x[2], mask = (1ULL<<ch->k) - 1;
@@ -442,7 +391,7 @@ int bfc_kc_get(const bfc_ch_t *ch, kchash_t *kc, const bfc_kmer_t *z)
 	return r;
 }
 
-void bfc_kc_print_kcov(const bfc_ch_t *ch, kchash_t *kc, const char *seq)
+void bfc_kc_print_kcov(const bfc_ch_t *ch, bfc_kc_t *kc, const char *seq)
 {
 	int len, i, l, r, c;
 	len = strlen(seq);
@@ -622,7 +571,7 @@ static void bfc_seq_revcomp(ecseq_t *seq)
  * independent ec routines *
  ***************************/
 
-int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch, kchash_t *kc)
+int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch, bfc_kc_t *kc)
 {
 	int i, j, max = 0, max_ec = -1, max2 = 0;
 	for (i = 0; i < k; ++i) {
@@ -655,7 +604,7 @@ int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
 	return i;
 }
 
-void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *kc)
+void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, bfc_kc_t *kc)
 {
 	int i, l, r, j;
 	bfc_kmer_t x = bfc_kmer_null;
@@ -726,7 +675,7 @@ typedef struct {
 typedef struct {
 	const bfc_opt_t *opt;
 	const bfc_ch_t *ch;
-	kchash_t *kc;
+	bfc_kc_t *kc;
 	kvec_t(echeap1_t) heap;
 	kvec_t(ecstack1_t) stack;
 	ecseq_t seq, tmp, ec[2];
