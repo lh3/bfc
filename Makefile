@@ -2,7 +2,7 @@ CC=			gcc
 CFLAGS=		-g -Wall -O2 -Wno-unused-function #-fno-inline-functions -fno-inline-functions-called-once
 CPPFLAGS=
 INCLUDES=	
-OBJS=		kthread.o utils.o bbf.o htab.o bfc.o
+OBJS=		kthread.o utils.o bseq.o bbf.o htab.o bfc.o
 PROG=		bfc
 LIBS=		-lm -lz -lpthread
 
@@ -25,5 +25,6 @@ depend:
 # DO NOT DELETE
 
 bbf.o: bbf.h
-bfc.o: bbf.h htab.h kmer.h kseq.h kvec.h ksort.h
+bfc.o: bbf.h htab.h kmer.h bseq.h kvec.h ksort.h
+bseq.o: bseq.h kseq.h
 htab.o: htab.h kmer.h khash.h

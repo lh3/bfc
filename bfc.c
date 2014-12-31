@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -6,65 +7,9 @@
 #include <limits.h>
 #include "bbf.h"
 #include "htab.h"
+#include "bseq.h"
 
-#define BFC_VERSION "r74"
-
-/****************
- * Sequence I/O *
- ****************/
-
-#include <zlib.h>
-#include "kseq.h"
-KSEQ_INIT(gzFile, gzread)
-
-unsigned char seq_nt6_table[256] = {
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
-};
-
-typedef struct {
-	int l_seq;
-	uint32_t aux;
-	char *name, *seq, *qual;
-} bseq1_t;
-
-bseq1_t *bseq_read(kseq_t *ks, int chunk_size, int *n_)
-{
-	int size = 0, m, n;
-	bseq1_t *seqs;
-	m = n = 0; seqs = 0;
-	while (kseq_read(ks) >= 0) {
-		bseq1_t *s;
-		if (n >= m) {
-			m = m? m<<1 : 256;
-			seqs = realloc(seqs, m * sizeof(bseq1_t));
-		}
-		s = &seqs[n];
-		s->name = strdup(ks->name.s);
-		s->seq = strdup(ks->seq.s);
-		s->qual = ks->qual.l? strdup(ks->qual.s) : 0;
-		s->l_seq = ks->seq.l;
-		s->aux = 0;
-		size += seqs[n++].l_seq;
-		if (size >= chunk_size) break;
-	}
-	*n_ = n;
-	return seqs;
-}
+#define BFC_VERSION "r75"
 
 /*****************
  * Configuration *
@@ -145,7 +90,7 @@ typedef struct {
 
 typedef struct {
 	const bfc_opt_t *opt;
-	kseq_t *ks;
+	bseq_file_t *ks;
 	bfc_bf_t *bf;
 	bfc_ch_t *ch;
 	int *n_buf;
@@ -668,7 +613,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 
 typedef struct {
 	const bfc_opt_t *opt;
-	kseq_t *ks;
+	bseq_file_t *ks;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
 } bfc_ecaux_t;
@@ -747,7 +692,6 @@ static void usage(FILE *fp, bfc_opt_t *o)
 
 int main(int argc, char *argv[])
 {
-	gzFile fp;
 	bfc_opt_t opt;
 	bfc_cntaux_t caux;
 	int i, c, mode;
@@ -805,11 +749,9 @@ int main(int argc, char *argv[])
 		for (i = 0; i < opt.n_threads; ++i)
 			caux.buf[i] = malloc(CNT_BUF_SIZE * sizeof(insbuf_t));
 
-		fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
-		caux.ks = kseq_init(fp);
+		caux.ks = bseq_open(argv[optind]);
 		kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
-		kseq_destroy(caux.ks);
-		gzclose(fp);
+		bseq_close(caux.ks);
 
 		bfc_bf_destroy(caux.bf);
 		caux.bf = 0;
@@ -827,11 +769,9 @@ int main(int argc, char *argv[])
 		eaux.e = calloc(opt.n_threads, sizeof(void*));
 		for (i = 0; i < opt.n_threads; ++i)
 			eaux.e[i] = ec1buf_init(&opt, caux.ch), eaux.e[i]->mode = mode;
-		fp = gzopen(argv[optind], "r");
-		eaux.ks = kseq_init(fp);
+		eaux.ks = bseq_open(argv[optind]);
 		kt_pipeline(no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
-		kseq_destroy(eaux.ks);
-		gzclose(fp);
+		bseq_close(eaux.ks);
 		for (i = 0; i < opt.n_threads; ++i)
 			ec1buf_destroy(eaux.e[i]);
 		free(eaux.e);
