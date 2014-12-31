@@ -9,7 +9,7 @@
 #include "htab.h"
 #include "bseq.h"
 
-#define BFC_VERSION "r75"
+#define BFC_VERSION "r77"
 
 /*****************
  * Configuration *
@@ -30,8 +30,9 @@ typedef struct {
 
 	int w_ec, w_ec_high, w_absent, w_absent_high;
 	int max_path_diff;
-
 	int discard;
+
+	int filter_mode;
 } bfc_opt_t;
 
 void bfc_opt_init(bfc_opt_t *opt)
@@ -83,7 +84,7 @@ const bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
 
 static double bfc_real_time;
 
-typedef struct {
+typedef struct { // cache to reduce locking
 	uint64_t y[2];
 	int is_high;
 } insbuf_t;
@@ -91,7 +92,7 @@ typedef struct {
 typedef struct {
 	const bfc_opt_t *opt;
 	bseq_file_t *ks;
-	bfc_bf_t *bf;
+	bfc_bf_t *bf, *bf_high;
 	bfc_ch_t *ch;
 	int *n_buf;
 	insbuf_t **buf;
@@ -106,6 +107,7 @@ typedef struct {
 int bfc_kmer_bufclear(bfc_cntaux_t *aux, int forced, int tid)
 {
 	int i, k, r;
+	if (aux->ch == 0) return 0;
 	for (i = k = 0; i < aux->n_buf[tid]; ++i) {
 		r = bfc_ch_insert(aux->ch, aux->buf[tid][i].y, aux->buf[tid][i].is_high, forced);
 		if (r < 0) aux->buf[tid][k++] = aux->buf[tid][i];
@@ -124,13 +126,14 @@ void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high, int ti
 	hash = (y[0] ^ y[1]) << k | ((y[0] + y[1]) & mask);
 	ret = bfc_bf_insert(aux->bf, hash);
 	if (ret == aux->opt->n_hashes) {
-		if (bfc_ch_insert(aux->ch, y, is_high, 0) < 0) {
+		if (aux->ch && bfc_ch_insert(aux->ch, y, is_high, 0) < 0) { // counting with a hash table
 			insbuf_t *p;
 			if (bfc_kmer_bufclear(aux, 0, tid) == CNT_BUF_SIZE)
 				bfc_kmer_bufclear(aux, 1, tid);
 			p = &aux->buf[tid][aux->n_buf[tid]++];
 			p->y[0] = y[0], p->y[1] = y[1], p->is_high = is_high;
-		}
+		} else if (aux->bf_high) // keep high-occurrence k-mers
+			bfc_bf_insert(aux->bf_high, hash);
 	}
 }
 
@@ -701,8 +704,9 @@ int main(int argc, char *argv[])
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
+	memset(&caux, 0, sizeof(bfc_cntaux_t));
 	caux.opt = &opt;
-	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D")) >= 0) {
+	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
@@ -713,6 +717,7 @@ int main(int argc, char *argv[])
 		else if (c == 'c') opt.min_cov = atoi(optarg);
 		else if (c == 'w') opt.win_multi_ec = atoi(optarg);
 		else if (c == 'D') opt.discard = 1;
+		else if (c == '1') opt.filter_mode = 1;
 		else if (c == 'J') no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
 		else if (c == 'V') bfc_verbose = atoi(optarg);
@@ -741,43 +746,49 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (in_hash == 0) {
+	if (in_hash == 0 || opt.filter_mode) {
 		caux.bf = bfc_bf_init(opt.n_shift, opt.n_hashes);
-		caux.ch = bfc_ch_init(opt.k);
-		caux.n_buf = calloc(opt.n_threads, sizeof(int));
-		caux.buf = calloc(opt.n_threads, sizeof(void*));
-		for (i = 0; i < opt.n_threads; ++i)
-			caux.buf[i] = malloc(CNT_BUF_SIZE * sizeof(insbuf_t));
-
-		caux.ks = bseq_open(argv[optind]);
-		kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
-		bseq_close(caux.ks);
-
+		if (!opt.filter_mode) {
+			caux.ch = bfc_ch_init(opt.k);
+			caux.n_buf = calloc(opt.n_threads, sizeof(int));
+			caux.buf = calloc(opt.n_threads, sizeof(void*));
+			for (i = 0; i < opt.n_threads; ++i)
+				caux.buf[i] = malloc(CNT_BUF_SIZE * sizeof(insbuf_t));
+			caux.ks = bseq_open(argv[optind]);
+			kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
+			bseq_close(caux.ks);
+			for (i = 0; i < opt.n_threads; ++i) free(caux.buf[i]);
+			free(caux.buf); free(caux.n_buf);
+		} else {
+			caux.bf_high = bfc_bf_init(opt.n_shift, opt.n_hashes);
+			caux.ks = bseq_open(argv[optind]);
+			kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
+			bseq_close(caux.ks);
+		}
 		bfc_bf_destroy(caux.bf);
 		caux.bf = 0;
-		for (i = 0; i < opt.n_threads; ++i) free(caux.buf[i]);
-		free(caux.buf); free(caux.n_buf);
 	} else caux.ch = bfc_ch_restore(in_hash);
 
-	mode = bfc_ch_hist(caux.ch, hist, hist_high);
-
-	if (out_hash) bfc_ch_dump(caux.ch, out_hash);
-
-	if (!no_ec) {
-		bfc_ecaux_t eaux;
-		eaux.opt = &opt;
-		eaux.e = calloc(opt.n_threads, sizeof(void*));
-		for (i = 0; i < opt.n_threads; ++i)
-			eaux.e[i] = ec1buf_init(&opt, caux.ch), eaux.e[i]->mode = mode;
-		eaux.ks = bseq_open(argv[optind]);
-		kt_pipeline(no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
-		bseq_close(eaux.ks);
-		for (i = 0; i < opt.n_threads; ++i)
-			ec1buf_destroy(eaux.e[i]);
-		free(eaux.e);
+	if (caux.ch) {
+		mode = bfc_ch_hist(caux.ch, hist, hist_high);
+		if (out_hash) bfc_ch_dump(caux.ch, out_hash);
+		if (!no_ec) {
+			bfc_ecaux_t eaux;
+			eaux.opt = &opt;
+			eaux.e = calloc(opt.n_threads, sizeof(void*));
+			for (i = 0; i < opt.n_threads; ++i)
+				eaux.e[i] = ec1buf_init(&opt, caux.ch), eaux.e[i]->mode = mode;
+			eaux.ks = bseq_open(argv[optind]);
+			kt_pipeline(no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
+			bseq_close(eaux.ks);
+			for (i = 0; i < opt.n_threads; ++i)
+				ec1buf_destroy(eaux.e[i]);
+			free(eaux.e);
+		}
+		bfc_ch_destroy(caux.ch);
+	} else if (caux.bf_high) {
+		bfc_bf_destroy(caux.bf_high);
 	}
-
-	bfc_ch_destroy(caux.ch);
 
 	fprintf(stderr, "[M::%s] CMD:", __func__);
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, BFC_VERSION);
