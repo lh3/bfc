@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r67"
+#define BFC_VERSION "r68"
 
 /******************
  * Hash functions *
@@ -841,7 +841,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
 				os = bfc_kc_get(e->ch, e->kc, &x);
-				if (c->q && (os&0xff) >= e->opt->min_cov && c->lcov >= e->opt->min_cov) fixed = 1;
+				if (c->q && (os&0xff) >= e->opt->min_cov + 1 && c->lcov >= e->opt->min_cov + 1) fixed = 1;
 				if (bfc_verbose >= 4) {
 					fprintf(stderr, "     Original base:%c qual:%d fixed:%d count:", "ACGTN"[c->b], c->q, fixed);
 					if (os >= 0) fprintf(stderr, "%d,%d\n", os&0xff, os>>8&0x3f);
@@ -918,7 +918,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 
 int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
-	int i, ret[2], start = 0, end = 0;
+	int i, start = 0, end = 0;
 	uint64_t r;
 	kh_clear(kc, e->kc);
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
@@ -940,9 +940,9 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
-	ret[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n);
+	bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n);
 	bfc_seq_revcomp(&e->seq);
-	ret[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n);
+	bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n);
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
