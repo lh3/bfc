@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <limits.h>
 
-#define BFC_VERSION "r70"
+#define BFC_VERSION "r71"
 
 /******************
  * Hash functions *
@@ -53,6 +53,7 @@ unsigned char seq_nt6_table[256] = {
 
 typedef struct {
 	int l_seq;
+	uint32_t aux;
 	char *name, *seq, *qual;
 } bseq1_t;
 
@@ -676,7 +677,7 @@ void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, kchash_t *k
 }
 
 uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
-{ // IMPORTANT: call bfc_ec_mark_solid() before hand!
+{ // IMPORTANT: call bfc_ec_kcov() before calling this function!
 	int i, l, max, max_i;
 	for (i = k - 1, max = l = 0, max_i = -1; i < s->n; ++i) {
 		if (!s->a[i].solid_end) {
@@ -882,7 +883,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			} // ~for(b)
 			if (fixed == 0 && other_ext == 0) ++n_failures;
 			if (n_failures > seq->n * 2) {
-				if (bfc_verbose >= 4) fprintf(stderr, "  -- too many unsuccessful attempts\n");
+				if (bfc_verbose >= 4) fprintf(stderr, "  !! too many unsuccessful attempts\n");
 				break;
 			}
 			if (c || n_added == 1) {
@@ -898,7 +899,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (e->stack.a[z.k].tot_pen < min_path_pen)
 				min_path_pen = e->stack.a[z.k].tot_pen, min_path = n_paths;
 			path[n_paths++] = z.k;
-			if (bfc_verbose >= 4) fprintf(stderr, "  -- n_paths=%d penalty=%d\n", n_paths, e->stack.a[z.k].tot_pen);
+			if (bfc_verbose >= 4) fprintf(stderr, "  @@ n_paths=%d penalty=%d\n", n_paths, e->stack.a[z.k].tot_pen);
 			if (n_paths == BFC_MAX_PATHS) break;
 		}
 	} // ~while(1)
@@ -909,18 +910,25 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	for (i = 0; i < ec->n; ++i) // mask out uncorrected regions
 		if (i < start + e->opt->k || i >= end) ec->a[i].b = 4;
 	if (bfc_verbose >= 4) {
-		fprintf(stderr, "* %d path(s); lowest penalty: %d\n  ", n_paths, e->stack.a[path[0]].tot_pen);
+		fprintf(stderr, "* %d path(s); lowest penalty: %d\n  ", n_paths, min_path_pen);
 		for (i = 0; i < ec->n; ++i) fputc((seq->a[i].b == ec->a[i].b? "ACGTN":"acgtn")[ec->a[i].b], stderr);
 		fputc('\n', stderr);
 	}
 	return 0;
 }
 
-int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
+typedef struct {
+	uint32_t failed:1, n_ec:16, n_ec_high:15;
+} ecstat_t;
+
+ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
 	int i, start = 0, end = 0;
 	uint64_t r;
+	ecstat_t s;
+
 	kh_clear(kc, e->kc);
+	s.failed = 1, s.n_ec = 0, s.n_ec_high = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	r = bfc_ec_best_island(e->opt->k, &e->seq);
@@ -936,13 +944,14 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		if (ec >= 0) {
 			e->seq.a[end - (ec>>2)].b = ec&3;
 			++end; start = end - e->opt->k;
-		} else return -1; // cannot find a solid k-mer anyway
+		} else return s; // cannot find a solid k-mer anyway
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
-	bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n);
+	if (bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n) < 0) return s;
 	bfc_seq_revcomp(&e->seq);
-	bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n);
+	if (bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n) < 0) return s;
+	s.failed = 0;
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
@@ -953,13 +962,26 @@ int bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b;
 		else c->b = e->seq.a[i].ob, c->conflict = 1;
 	}
-	//bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	for (i = 0; i < e->seq.n; ++i) {
 		int is_diff = !(e->seq.a[i].b == e->seq.a[i].ob);
+		if (is_diff) {
+			++s.n_ec;
+			if (e->seq.a[i].q) ++s.n_ec_high;
+		}
 		seq[i] = (is_diff? "acgtn" : "ACGTN")[e->seq.a[i].b];
 		qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
 	}
-	return 0;
+	if (bfc_verbose >= 4) {
+		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+		fprintf(stderr, "* failed:%d n_ec:%d n_ec_high:%d\n  ", s.failed, s.n_ec, s.n_ec_high);
+		for (i = 0; i < e->seq.n; ++i)
+			fputc((e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b], stderr);
+		fprintf(stderr, "\n  ");
+		for (i = 0; i < e->seq.n; ++i)
+			fputc('0' + (int)(10. * e->seq.a[i].lcov / e->opt->k + .499), stderr);
+		fputc('\n', stderr);
+	}
+	return s;
 }
 
 /********************
@@ -984,7 +1006,9 @@ static void worker_ec(void *_data, long k, int tid)
 	bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
 	bfc_ecaux_t *aux = data->aux;
 	bseq1_t *s = &data->seqs[k];
-	bfc_ec1(aux->e[tid], s->seq, s->qual);
+	ecstat_t st;
+	st = bfc_ec1(aux->e[tid], s->seq, s->qual);
+	s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
 }
 
 void *bfc_ec_cb(void *shared, int step, void *_data)
@@ -1009,7 +1033,8 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		int i;
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
-			printf("%c%s\n%s\n", s->qual? '@' : '>', s->name, s->seq);
+			printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
+				   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
 			if (s->qual) printf("+\n%s\n", s->qual);
 			free(s->seq); free(s->qual); free(s->name);
 		}
