@@ -431,49 +431,57 @@ typedef struct {
 	const bfc_bf_t *bf;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
-} bfc_ecaux_t;
+} ec_shared_t;
 
 typedef struct {
 	int n_seqs;
 	bseq1_t *seqs;
-	bfc_ecaux_t *aux;
-} bfc_ec_data_t;
+	ec_shared_t *aux;
+} ec_step_t;
 
 static void worker_ec(void *_data, long k, int tid)
 {
-	bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
-	bfc_ecaux_t *aux = data->aux;
+	ec_step_t *data = (ec_step_t*)_data;
+	ec_shared_t *aux = data->aux;
 	bseq1_t *s = &data->seqs[k];
-	ecstat_t st;
-	st = bfc_ec1(aux->e[tid], s->seq, s->qual);
-	s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
+	if (!aux->opt->filter_mode) {
+		ecstat_t st;
+		st = bfc_ec1(aux->e[tid], s->seq, s->qual);
+		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
+	} else {
+	}
 }
 
 void *bfc_ec_cb(void *shared, int step, void *_data)
 {
-	bfc_ecaux_t *aux = (bfc_ecaux_t*)shared;
+	ec_shared_t *aux = (ec_shared_t*)shared;
 	if (step == 0) {
-		bfc_ec_data_t *ret;
-		ret = calloc(1, sizeof(bfc_ec_data_t));
+		ec_step_t *ret;
+		ret = calloc(1, sizeof(ec_step_t));
 		ret->seqs = bseq_read(aux->ks, aux->opt->chunk_size, &ret->n_seqs);
 		ret->aux = aux;
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
 		if (ret->seqs) return ret;
 		else free(ret);
 	} else if (step == 1) {
-		bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
+		ec_step_t *data = (ec_step_t*)_data;
 		kt_for(aux->opt->n_threads, worker_ec, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs)\n",
 				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
 		return data;
 	} else if (step == 2) {
-		bfc_ec_data_t *data = (bfc_ec_data_t*)_data;
+		ec_step_t *data = (ec_step_t*)_data;
 		int i;
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
-			if (aux->opt->discard && (s->aux&1)) continue;
-			printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
-				   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
+			if (!aux->opt->filter_mode) {
+				if (aux->opt->discard && (s->aux&1)) continue;
+				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
+					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
+			} else {
+				if (s->aux == 0) continue;
+				printf("%c%s\n%s\n", s->qual? '@' : '>', s->name, s->seq);
+			}
 			if (s->qual) printf("+\n%s\n", s->qual);
 			free(s->seq); free(s->qual); free(s->name);
 		}
@@ -485,11 +493,11 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 {
 	int i, mode;
-	bfc_ecaux_t eaux;
+	ec_shared_t es;
 	uint64_t hist[256], hist_high[64];
 
-	memset(&eaux, 0, sizeof(bfc_ecaux_t));
-	eaux.opt = opt;
+	memset(&es, 0, sizeof(ec_shared_t));
+	es.opt = opt;
 	if (!opt->filter_mode) {
 		const bfc_ch_t *ch = (const bfc_ch_t*)ptr;
 
@@ -500,19 +508,19 @@ void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 				else fprintf(stderr, "[M::%s] %3d : %llu\n", __func__, i, (long long)hist[i]);
 		}
 
-		eaux.e = calloc(opt->n_threads, sizeof(void*));
+		es.e = calloc(opt->n_threads, sizeof(void*));
 		for (i = 0; i < opt->n_threads; ++i)
-			eaux.e[i] = ec1buf_init(opt, ch), eaux.e[i]->mode = mode;
-		eaux.ks = bseq_open(fn);
-		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
-		bseq_close(eaux.ks);
+			es.e[i] = ec1buf_init(opt, ch), es.e[i]->mode = mode;
+		es.ks = bseq_open(fn);
+		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &es, 3);
+		bseq_close(es.ks);
 		for (i = 0; i < opt->n_threads; ++i)
-			ec1buf_destroy(eaux.e[i]);
-		free(eaux.e);
+			ec1buf_destroy(es.e[i]);
+		free(es.e);
 	} else {
-		eaux.bf = (const bfc_bf_t*)ptr;
-		eaux.ks = bseq_open(fn);
-		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
-		bseq_close(eaux.ks);
+		es.bf = (const bfc_bf_t*)ptr;
+		es.ks = bseq_open(fn);
+		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &es, 3);
+		bseq_close(es.ks);
 	}
 }
