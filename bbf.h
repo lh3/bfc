@@ -14,5 +14,6 @@ typedef struct {
 bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes);
 void bfc_bf_destroy(bfc_bf_t *b);
 int bfc_bf_insert(bfc_bf_t *b, uint64_t hash);
+int bfc_bf_get(const bfc_bf_t *b, uint64_t hash);
 
 #endif

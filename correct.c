@@ -421,6 +421,31 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	return s;
 }
 
+/******************
+ * K-mer trimming *
+ ******************/
+
+static uint64_t max_streak(int k, const bfc_bf_t *bf, bseq1_t *s)
+{
+	int i, l;
+	uint64_t max = 0, t = 0;
+	bfc_kmer_t x = bfc_kmer_null;
+	for (i = l = 0; i < s->l_seq; ++i) {
+		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
+		if (c < 4) { // not an ambiguous base
+			bfc_kmer_append(k, x.x, c);
+			if (++l >= k) { // ok, we have a k-mer now
+				uint64_t hash, y[2];
+				hash = bfc_kmer_hash(k, x.x, y);
+				if (bfc_bf_get(bf, hash) == bf->n_hashes) t += 1ULL<<32; // in bloom filter
+				else t = i + 1;
+			} else t = i + 1;
+		} else l = 0, x = bfc_kmer_null, t = i + 1;
+		max = max > t? max : t;
+	}
+	return max;
+}
+
 /********************
  * Error correction *
  ********************/
@@ -449,6 +474,19 @@ static void worker_ec(void *_data, long k, int tid)
 		st = bfc_ec1(es->e[tid], s->seq, s->qual);
 		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
 	} else {
+		uint64_t max;
+		max = max_streak(es->opt->k, es->bf, s);
+		if ((double)((max>>32) + es->opt->k) / s->l_seq > es->opt->min_frac) {
+			int start = (uint32_t)max, end = start + (max>>32);
+			start -= es->opt->k;
+			memmove(s->seq, s->seq + start, end - start);
+			s->seq[end - start] = 0;
+			if (s->qual) {
+				memmove(s->qual, s->qual + start, end - start);
+				s->qual[end - start] = 0;
+			}
+			s->aux = 0;
+		} else s->aux = 1;
 	}
 }
 
@@ -479,7 +517,7 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
 					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
 			} else {
-				if (s->aux == 0) continue;
+				if (s->aux) continue;
 				printf("%c%s\n%s\n", s->qual? '@' : '>', s->name, s->seq);
 			}
 			if (s->qual) printf("+\n%s\n", s->qual);

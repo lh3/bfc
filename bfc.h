@@ -14,6 +14,8 @@ typedef struct {
 	int k, q;
 
 	int filter_mode;
+	float min_frac;
+
 	int n_shift, n_hashes;
 
 	int max_end_ext;
