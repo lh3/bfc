@@ -87,10 +87,8 @@ static void worker_count(void *_data, long k, int tid)
 		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
 		if (c < 4) {
 			bfc_kmer_append(o->k, x.x, c);
-			if (++l >= o->k) {
-				qmer = (qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q)) & mask;
-				bfc_kmer_insert(aux, &x, (qmer == mask), tid);
-			}
+			qmer = (qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q)) & mask;
+			if (++l >= o->k) bfc_kmer_insert(aux, &x, (qmer == mask), tid);
 		} else l = 0, qmer = 0, x = bfc_kmer_null;
 	}
 }

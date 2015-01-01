@@ -7,7 +7,7 @@
 #include <limits.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r79"
+#define BFC_VERSION "r82"
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
