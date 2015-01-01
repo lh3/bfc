@@ -428,6 +428,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 typedef struct {
 	const bfc_opt_t *opt;
 	bseq_file_t *ks;
+	const bfc_bf_t *bf;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
 } bfc_ecaux_t;
@@ -481,27 +482,37 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 	return 0;
 }
 
-void bfc_correct(const char *fn, const bfc_opt_t *opt, const bfc_ch_t *ch)
+void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 {
 	int i, mode;
 	bfc_ecaux_t eaux;
 	uint64_t hist[256], hist_high[64];
 
-	mode = bfc_ch_hist(ch, hist, hist_high);
-	if (bfc_verbose >= 4) {
-		for (i = 0; i < 256; ++i)
-			if (i < 64) fprintf(stderr, "[M::%s] %3d : %llu : %llu\n", __func__, i, (long long)hist[i], (long long)hist_high[i]);
-			else fprintf(stderr, "[M::%s] %3d : %llu\n", __func__, i, (long long)hist[i]);
-	}
-
+	memset(&eaux, 0, sizeof(bfc_ecaux_t));
 	eaux.opt = opt;
-	eaux.e = calloc(opt->n_threads, sizeof(void*));
-	for (i = 0; i < opt->n_threads; ++i)
-		eaux.e[i] = ec1buf_init(opt, ch), eaux.e[i]->mode = mode;
-	eaux.ks = bseq_open(fn);
-	kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
-	bseq_close(eaux.ks);
-	for (i = 0; i < opt->n_threads; ++i)
-		ec1buf_destroy(eaux.e[i]);
-	free(eaux.e);
+	if (!opt->filter_mode) {
+		const bfc_ch_t *ch = (const bfc_ch_t*)ptr;
+
+		mode = bfc_ch_hist(ch, hist, hist_high);
+		if (bfc_verbose >= 4) {
+			for (i = 0; i < 256; ++i)
+				if (i < 64) fprintf(stderr, "[M::%s] %3d : %llu : %llu\n", __func__, i, (long long)hist[i], (long long)hist_high[i]);
+				else fprintf(stderr, "[M::%s] %3d : %llu\n", __func__, i, (long long)hist[i]);
+		}
+
+		eaux.e = calloc(opt->n_threads, sizeof(void*));
+		for (i = 0; i < opt->n_threads; ++i)
+			eaux.e[i] = ec1buf_init(opt, ch), eaux.e[i]->mode = mode;
+		eaux.ks = bseq_open(fn);
+		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
+		bseq_close(eaux.ks);
+		for (i = 0; i < opt->n_threads; ++i)
+			ec1buf_destroy(eaux.e[i]);
+		free(eaux.e);
+	} else {
+		eaux.bf = (const bfc_bf_t*)ptr;
+		eaux.ks = bseq_open(fn);
+		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
+		bseq_close(eaux.ks);
+	}
 }

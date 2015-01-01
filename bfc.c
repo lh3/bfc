@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
 		if (!no_ec) bfc_correct(argv[optind], &opt, ch);
 		bfc_ch_destroy(ch);
 	} else if (bf) {
-		bfc_filter(argv[optind], &opt, bf);
+		bfc_correct(argv[optind], &opt, bf);
 		bfc_bf_destroy(bf);
 	}
 
