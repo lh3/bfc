@@ -19,11 +19,6 @@
 
 #define CNT_BUF_SIZE 256
 
-void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
-void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
-double cputime(void);
-double realtime(void);
-
 typedef struct { // cache to reduce locking
 	uint64_t y[2];
 	int is_high;
