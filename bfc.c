@@ -5,35 +5,24 @@
 #include <stdint.h>
 #include <assert.h>
 #include <limits.h>
-#include "bbf.h"
-#include "htab.h"
-#include "bseq.h"
+#include "bfc.h"
 
 #define BFC_VERSION "r79"
+
+void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
+void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+double cputime(void);
+double realtime(void);
+
+int bfc_verbose = 3;
+double bfc_real_time;
+bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
 
 /*****************
  * Configuration *
  *****************/
 
 #include <math.h>
-
-int bfc_verbose = 3;
-
-typedef struct {
-	int chunk_size;
-	int n_threads;
-	int k, q;
-	int n_shift, n_hashes;
-	int min_cov; // a k-mer is considered solid if the count is no less than this
-	int win_multi_ec; // no 2 high-qual corrections or 4 corrections in a window of this size
-	int max_end_ext;
-
-	int w_ec, w_ec_high, w_absent, w_absent_high;
-	int max_path_diff;
-	int discard;
-
-	int filter_mode;
-} bfc_opt_t;
 
 void bfc_opt_init(bfc_opt_t *opt)
 {
@@ -61,131 +50,6 @@ void bfc_opt_by_size(bfc_opt_t *opt, long size)
 	opt->k = (int)(log(size) / log(2) * 1.2);
 	if (opt->k > 37) opt->k = 37;
 	opt->n_shift = opt->k;
-}
-
-/*******************************
- * Other routines for counting *
- *******************************/
-
-/* A note on multi-threading
-
-   The bloom filter is always the same regardless of how many threads in use.
-   However, the k-mer inserted to the hash table may be slightly different.
-   Suppose k-mers A and B are both singletons and that if A is inserted first,
-   B is a false positive and gets inserted to the hash table. In the
-   multi-threading mode, nonetheless, B may be inserted before A. In this case,
-   B is not a false positive any more. This is not a bug. The k-mers put into
-   the hash table depends on the order of input.
-*/
-
-const bfc_kmer_t bfc_kmer_null = {{0,0,0,0}};
-
-#define CNT_BUF_SIZE 256
-
-static double bfc_real_time;
-
-typedef struct { // cache to reduce locking
-	uint64_t y[2];
-	int is_high;
-} insbuf_t;
-
-typedef struct {
-	const bfc_opt_t *opt;
-	bseq_file_t *ks;
-	bfc_bf_t *bf, *bf_high;
-	bfc_ch_t *ch;
-	int *n_buf;
-	insbuf_t **buf;
-} bfc_cntaux_t;
-
-typedef struct {
-	int n_seqs;
-	bseq1_t *seqs;
-	bfc_cntaux_t *aux;
-} bfc_count_data_t;
-
-int bfc_kmer_bufclear(bfc_cntaux_t *aux, int forced, int tid)
-{
-	int i, k, r;
-	if (aux->ch == 0) return 0;
-	for (i = k = 0; i < aux->n_buf[tid]; ++i) {
-		r = bfc_ch_insert(aux->ch, aux->buf[tid][i].y, aux->buf[tid][i].is_high, forced);
-		if (r < 0) aux->buf[tid][k++] = aux->buf[tid][i];
-	}
-	aux->n_buf[tid] = k;
-	return k;
-}
-
-void bfc_kmer_insert(bfc_cntaux_t *aux, const bfc_kmer_t *x, int is_high, int tid)
-{
-	int k = aux->opt->k, ret;
-	uint64_t y[2], hash;
-	hash = bfc_kmer_hash(k, x->x, y);
-	ret = bfc_bf_insert(aux->bf, hash);
-	if (ret == aux->opt->n_hashes) {
-		if (aux->ch && bfc_ch_insert(aux->ch, y, is_high, 0) < 0) { // counting with a hash table
-			insbuf_t *p;
-			if (bfc_kmer_bufclear(aux, 0, tid) == CNT_BUF_SIZE)
-				bfc_kmer_bufclear(aux, 1, tid);
-			p = &aux->buf[tid][aux->n_buf[tid]++];
-			p->y[0] = y[0], p->y[1] = y[1], p->is_high = is_high;
-		} else if (aux->bf_high) // keep high-occurrence k-mers
-			bfc_bf_insert(aux->bf_high, hash);
-	}
-}
-
-static void worker_count(void *_data, long k, int tid)
-{
-	bfc_count_data_t *data = (bfc_count_data_t*)_data;
-	bfc_cntaux_t *aux = data->aux;
-	bseq1_t *s = &data->seqs[k];
-	const bfc_opt_t *o = aux->opt;
-	int i, l;
-	bfc_kmer_t x = bfc_kmer_null;
-	uint64_t qmer = 0, mask = (1ULL<<o->k) - 1;
-	for (i = l = 0; i < s->l_seq; ++i) {
-		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
-		if (c < 4) {
-			bfc_kmer_append(o->k, x.x, c);
-			if (++l >= o->k) {
-				qmer = (qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q)) & mask;
-				bfc_kmer_insert(aux, &x, (qmer == mask), tid);
-			}
-		} else l = 0, qmer = 0, x = bfc_kmer_null;
-	}
-}
-
-void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
-void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
-double cputime(void);
-double realtime(void);
-
-void *bfc_count_cb(void *shared, int step, void *_data)
-{
-	bfc_cntaux_t *aux = (bfc_cntaux_t*)shared;
-	if (step == 0) {
-		bfc_count_data_t *ret;
-		ret = calloc(1, sizeof(bfc_count_data_t));
-		ret->seqs = bseq_read(aux->ks, aux->opt->chunk_size, &ret->n_seqs);
-		ret->aux = aux;
-		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
-		if (ret->seqs) return ret;
-		else free(ret);
-	} else if (step == 1) {
-		int i;
-		bfc_count_data_t *data = (bfc_count_data_t*)_data;
-		kt_for(aux->opt->n_threads, worker_count, data, data->n_seqs);
-		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs; # distinct k-mers: %ld)\n",
-				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time, (long)bfc_ch_count(aux->ch));
-		for (i = 0; i < aux->opt->n_threads; ++i)
-			bfc_kmer_bufclear(aux, 1, i);
-		for (i = 0; i < data->n_seqs; ++i) {
-			bseq1_t *s = &data->seqs[i];
-			free(s->seq); free(s->qual); free(s->name);
-		}
-		free(data->seqs); free(data);
-	}
-	return 0;
 }
 
 /**************************
@@ -693,16 +557,14 @@ static void usage(FILE *fp, bfc_opt_t *o)
 int main(int argc, char *argv[])
 {
 	bfc_opt_t opt;
-	bfc_cntaux_t caux;
+	bfc_bf_t *bf = 0;
+	bfc_ch_t *ch = 0;
 	int i, c, mode;
 	int no_mt_io = 0, no_ec = 0;
 	char *in_hash = 0, *out_hash = 0;
-	uint64_t hist[256], hist_high[64];
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
-	memset(&caux, 0, sizeof(bfc_cntaux_t));
-	caux.opt = &opt;
 	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'd') out_hash = optarg;
@@ -743,38 +605,25 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (in_hash == 0 || opt.filter_mode) {
-		caux.bf = bfc_bf_init(opt.n_shift, opt.n_hashes);
-		if (!opt.filter_mode) {
-			caux.ch = bfc_ch_init(opt.k);
-			caux.n_buf = calloc(opt.n_threads, sizeof(int));
-			caux.buf = calloc(opt.n_threads, sizeof(void*));
-			for (i = 0; i < opt.n_threads; ++i)
-				caux.buf[i] = malloc(CNT_BUF_SIZE * sizeof(insbuf_t));
-			caux.ks = bseq_open(argv[optind]);
-			kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
-			bseq_close(caux.ks);
-			for (i = 0; i < opt.n_threads; ++i) free(caux.buf[i]);
-			free(caux.buf); free(caux.n_buf);
-		} else {
-			caux.bf_high = bfc_bf_init(opt.n_shift, opt.n_hashes);
-			caux.ks = bseq_open(argv[optind]);
-			kt_pipeline(no_mt_io? 1 : 2, bfc_count_cb, &caux, 2);
-			bseq_close(caux.ks);
-		}
-		bfc_bf_destroy(caux.bf);
-		caux.bf = 0;
-	} else caux.ch = bfc_ch_restore(in_hash);
+	if (opt.filter_mode) bf = (bfc_bf_t*)bfc_count(argv[optind], &opt);
+	else if (in_hash) ch = bfc_ch_restore(in_hash);
+	else ch = (bfc_ch_t*)bfc_count(argv[optind], &opt);
 
-	if (caux.ch) {
-		mode = bfc_ch_hist(caux.ch, hist, hist_high);
-		if (out_hash) bfc_ch_dump(caux.ch, out_hash);
+	if (ch) {
+		uint64_t hist[256], hist_high[64];
+		mode = bfc_ch_hist(ch, hist, hist_high);
+		if (bfc_verbose >= 4) {
+			for (i = 0; i < 256; ++i)
+				if (i < 64) fprintf(stderr, "[M::%s] %3d : %llu : %llu\n", __func__, i, (long long)hist[i], (long long)hist_high[i]);
+				else fprintf(stderr, "[M::%s] %3d : %llu\n", __func__, i, (long long)hist[i]);
+		}
+		if (out_hash) bfc_ch_dump(ch, out_hash);
 		if (!no_ec) {
 			bfc_ecaux_t eaux;
 			eaux.opt = &opt;
 			eaux.e = calloc(opt.n_threads, sizeof(void*));
 			for (i = 0; i < opt.n_threads; ++i)
-				eaux.e[i] = ec1buf_init(&opt, caux.ch), eaux.e[i]->mode = mode;
+				eaux.e[i] = ec1buf_init(&opt, ch), eaux.e[i]->mode = mode;
 			eaux.ks = bseq_open(argv[optind]);
 			kt_pipeline(no_mt_io? 1 : 2, bfc_ec_cb, &eaux, 3);
 			bseq_close(eaux.ks);
@@ -782,13 +631,13 @@ int main(int argc, char *argv[])
 				ec1buf_destroy(eaux.e[i]);
 			free(eaux.e);
 		}
-		bfc_ch_destroy(caux.ch);
-	} else if (caux.bf_high) {
-		bfc_bf_destroy(caux.bf_high);
+		bfc_ch_destroy(ch);
+	} else if (bf) {
+		bfc_bf_destroy(bf);
 	}
 
-	fprintf(stderr, "[M::%s] CMD:", __func__);
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, BFC_VERSION);
+	fprintf(stderr, "[M::%s] CMD:", __func__);
 	for (i = 0; i < argc; ++i)
 		fprintf(stderr, " %s", argv[i]);
 	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - bfc_real_time, cputime());
