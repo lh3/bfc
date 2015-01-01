@@ -29,6 +29,7 @@ extern double bfc_real_time;
 extern bfc_kmer_t bfc_kmer_null;
 
 void *bfc_count(const char *fn, const bfc_opt_t *opt);
+void bfc_filter(const char *fn, const bfc_opt_t *opt, const bfc_bf_t *bf);
 void bfc_correct(const char *fn, const bfc_opt_t *opt, const bfc_ch_t *ch);
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
