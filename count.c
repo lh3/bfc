@@ -36,45 +36,45 @@ typedef struct {
 typedef struct {
 	int n_seqs;
 	bseq1_t *seqs;
-	cnt_shared_t *aux;
+	cnt_shared_t *cs;
 } cnt_step_t;
 
-static int bfc_kmer_bufclear(cnt_shared_t *aux, int forced, int tid)
+static int bfc_kmer_bufclear(cnt_shared_t *cs, int forced, int tid)
 {
 	int i, k, r;
-	if (aux->ch == 0) return 0;
-	for (i = k = 0; i < aux->n_buf[tid]; ++i) {
-		r = bfc_ch_insert(aux->ch, aux->buf[tid][i].y, aux->buf[tid][i].is_high, forced);
-		if (r < 0) aux->buf[tid][k++] = aux->buf[tid][i];
+	if (cs->ch == 0) return 0;
+	for (i = k = 0; i < cs->n_buf[tid]; ++i) {
+		r = bfc_ch_insert(cs->ch, cs->buf[tid][i].y, cs->buf[tid][i].is_high, forced);
+		if (r < 0) cs->buf[tid][k++] = cs->buf[tid][i];
 	}
-	aux->n_buf[tid] = k;
+	cs->n_buf[tid] = k;
 	return k;
 }
 
-static void bfc_kmer_insert(cnt_shared_t *aux, const bfc_kmer_t *x, int is_high, int tid)
+static void bfc_kmer_insert(cnt_shared_t *cs, const bfc_kmer_t *x, int is_high, int tid)
 {
-	int k = aux->opt->k, ret;
+	int k = cs->opt->k, ret;
 	uint64_t y[2], hash;
 	hash = bfc_kmer_hash(k, x->x, y);
-	ret = bfc_bf_insert(aux->bf, hash);
-	if (ret == aux->opt->n_hashes) {
-		if (aux->ch && bfc_ch_insert(aux->ch, y, is_high, 0) < 0) { // counting with a hash table
+	ret = bfc_bf_insert(cs->bf, hash);
+	if (ret == cs->opt->n_hashes) {
+		if (cs->ch && bfc_ch_insert(cs->ch, y, is_high, 0) < 0) { // counting with a hash table
 			insbuf_t *p;
-			if (bfc_kmer_bufclear(aux, 0, tid) == CNT_BUF_SIZE)
-				bfc_kmer_bufclear(aux, 1, tid);
-			p = &aux->buf[tid][aux->n_buf[tid]++];
+			if (bfc_kmer_bufclear(cs, 0, tid) == CNT_BUF_SIZE)
+				bfc_kmer_bufclear(cs, 1, tid);
+			p = &cs->buf[tid][cs->n_buf[tid]++];
 			p->y[0] = y[0], p->y[1] = y[1], p->is_high = is_high;
-		} else if (aux->bf_high) // keep high-occurrence k-mers
-			bfc_bf_insert(aux->bf_high, hash);
+		} else if (cs->bf_high) // keep high-occurrence k-mers
+			bfc_bf_insert(cs->bf_high, hash);
 	}
 }
 
 static void worker_count(void *_data, long k, int tid)
 {
 	cnt_step_t *data = (cnt_step_t*)_data;
-	cnt_shared_t *aux = data->aux;
+	cnt_shared_t *cs = data->cs;
 	bseq1_t *s = &data->seqs[k];
-	const bfc_opt_t *o = aux->opt;
+	const bfc_opt_t *o = cs->opt;
 	int i, l;
 	bfc_kmer_t x = bfc_kmer_null;
 	uint64_t qmer = 0, mask = (1ULL<<o->k) - 1;
@@ -83,30 +83,30 @@ static void worker_count(void *_data, long k, int tid)
 		if (c < 4) {
 			bfc_kmer_append(o->k, x.x, c);
 			qmer = (qmer<<1 | (s->qual == 0 || s->qual[i] - 33 >= o->q)) & mask;
-			if (++l >= o->k) bfc_kmer_insert(aux, &x, (qmer == mask), tid);
+			if (++l >= o->k) bfc_kmer_insert(cs, &x, (qmer == mask), tid);
 		} else l = 0, qmer = 0, x = bfc_kmer_null;
 	}
 }
 
 static void *bfc_count_cb(void *shared, int step, void *_data)
 {
-	cnt_shared_t *aux = (cnt_shared_t*)shared;
+	cnt_shared_t *cs = (cnt_shared_t*)shared;
 	if (step == 0) {
 		cnt_step_t *ret;
 		ret = calloc(1, sizeof(cnt_step_t));
-		ret->seqs = bseq_read(aux->ks, aux->opt->chunk_size, &ret->n_seqs);
-		ret->aux = aux;
+		ret->seqs = bseq_read(cs->ks, cs->opt->chunk_size, &ret->n_seqs);
+		ret->cs = cs;
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
 		if (ret->seqs) return ret;
 		else free(ret);
 	} else if (step == 1) {
 		int i;
 		cnt_step_t *data = (cnt_step_t*)_data;
-		kt_for(aux->opt->n_threads, worker_count, data, data->n_seqs);
+		kt_for(cs->opt->n_threads, worker_count, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs; # distinct k-mers: %ld)\n",
-				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time, (long)bfc_ch_count(aux->ch));
-		for (i = 0; i < aux->opt->n_threads; ++i)
-			bfc_kmer_bufclear(aux, 1, i);
+				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time, (long)bfc_ch_count(cs->ch));
+		for (i = 0; i < cs->opt->n_threads; ++i)
+			bfc_kmer_bufclear(cs, 1, i);
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
 			free(s->seq); free(s->qual); free(s->name);

@@ -436,17 +436,17 @@ typedef struct {
 typedef struct {
 	int n_seqs;
 	bseq1_t *seqs;
-	ec_shared_t *aux;
+	ec_shared_t *es;
 } ec_step_t;
 
 static void worker_ec(void *_data, long k, int tid)
 {
 	ec_step_t *data = (ec_step_t*)_data;
-	ec_shared_t *aux = data->aux;
+	ec_shared_t *es = data->es;
 	bseq1_t *s = &data->seqs[k];
-	if (!aux->opt->filter_mode) {
+	if (!es->opt->filter_mode) {
 		ecstat_t st;
-		st = bfc_ec1(aux->e[tid], s->seq, s->qual);
+		st = bfc_ec1(es->e[tid], s->seq, s->qual);
 		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
 	} else {
 	}
@@ -454,18 +454,18 @@ static void worker_ec(void *_data, long k, int tid)
 
 void *bfc_ec_cb(void *shared, int step, void *_data)
 {
-	ec_shared_t *aux = (ec_shared_t*)shared;
+	ec_shared_t *es = (ec_shared_t*)shared;
 	if (step == 0) {
 		ec_step_t *ret;
 		ret = calloc(1, sizeof(ec_step_t));
-		ret->seqs = bseq_read(aux->ks, aux->opt->chunk_size, &ret->n_seqs);
-		ret->aux = aux;
+		ret->seqs = bseq_read(es->ks, es->opt->chunk_size, &ret->n_seqs);
+		ret->es = es;
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
 		if (ret->seqs) return ret;
 		else free(ret);
 	} else if (step == 1) {
 		ec_step_t *data = (ec_step_t*)_data;
-		kt_for(aux->opt->n_threads, worker_ec, data, data->n_seqs);
+		kt_for(es->opt->n_threads, worker_ec, data, data->n_seqs);
 		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs)\n",
 				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
 		return data;
@@ -474,8 +474,8 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		int i;
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
-			if (!aux->opt->filter_mode) {
-				if (aux->opt->discard && (s->aux&1)) continue;
+			if (!es->opt->filter_mode) {
+				if (es->opt->discard && (s->aux&1)) continue;
 				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
 					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
 			} else {
@@ -492,14 +492,13 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 
 void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 {
-	int i, mode;
 	ec_shared_t es;
-	uint64_t hist[256], hist_high[64];
-
 	memset(&es, 0, sizeof(ec_shared_t));
 	es.opt = opt;
 	if (!opt->filter_mode) {
+		int i, mode;
 		const bfc_ch_t *ch = (const bfc_ch_t*)ptr;
+		uint64_t hist[256], hist_high[64];
 
 		mode = bfc_ch_hist(ch, hist, hist_high);
 		if (bfc_verbose >= 4) {
