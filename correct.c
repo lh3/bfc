@@ -425,7 +425,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
  * K-mer trimming *
  ******************/
 
-static uint64_t max_streak(int k, const bfc_bf_t *bf, bseq1_t *s)
+static uint64_t max_streak(int k, const bfc_bf_t *bf, const bseq1_t *s)
 {
 	int i, l;
 	uint64_t max = 0, t = 0;
@@ -478,12 +478,14 @@ static void worker_ec(void *_data, long k, int tid)
 		max = max_streak(es->opt->k, es->bf, s);
 		if ((double)((max>>32) + es->opt->k) / s->l_seq > es->opt->min_frac) {
 			int start = (uint32_t)max, end = start + (max>>32);
-			start -= es->opt->k;
+			start -= es->opt->k - 1;
+			assert(start >= 0 && end <= s->l_seq);
 			memmove(s->seq, s->seq + start, end - start);
-			s->seq[end - start] = 0;
+			s->l_seq = end - start;
+			s->seq[s->l_seq] = 0;
 			if (s->qual) {
-				memmove(s->qual, s->qual + start, end - start);
-				s->qual[end - start] = 0;
+				memmove(s->qual, s->qual + start, s->l_seq);
+				s->qual[s->l_seq] = 0;
 			}
 			s->aux = 0;
 		} else s->aux = 1;
