@@ -515,14 +515,15 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
 			if (!es->opt->filter_mode) {
-				if (es->opt->discard && (s->aux&1)) continue;
+				if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
 				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
 					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
 			} else {
-				if (s->aux) continue;
+				if (s->aux) goto bfc_ec_cb_free;
 				printf("%c%s\n%s\n", s->qual? '@' : '>', s->name, s->seq);
 			}
 			if (s->qual) printf("+\n%s\n", s->qual);
+bfc_ec_cb_free:
 			free(s->seq); free(s->qual); free(s->name);
 		}
 		free(data->seqs); free(data);
