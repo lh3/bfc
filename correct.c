@@ -187,6 +187,8 @@ static void ec1buf_destroy(bfc_ec1buf_t *e)
 	free(e);
 }
 
+#define weighted_penalty(o, p) ((o)->w_ec * (p).ec + (o)->w_ec_high * (p).ec_high + (o)->w_absent * (p).absent + (o)->w_absent_high * (p).absent_high)
+
 static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen)
 {
 	ecstack1_t *q;
@@ -199,7 +201,7 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	q->i = prev->i;
 	q->b = b;
 	q->pen = pen;
-	q->tot_pen = prev->tot_pen + o->w_ec * pen.ec + o->w_ec_high * pen.ec_high + o->w_absent * pen.absent + o->w_absent_high * pen.absent_high;
+	q->tot_pen = prev->tot_pen + weighted_penalty(o, pen);
 	// update heap
 	kv_pushp(echeap1_t, e->heap, &r);
 	r->i = prev->i + 1;
@@ -324,8 +326,17 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				break;
 			}
 			if (c || n_added == 1) {
-				for (b = 0; b < n_added; ++b)
-					buf_update(e, &z, added[b]);
+				if (n_added > 1 && e->heap.n > 2 * (end - start)) { // to prevent heap explosion
+					int min_b = -1, min = INT_MAX;
+					for (b = 0; b < n_added; ++b) {
+						int t = weighted_penalty(e->opt, added[b]);
+						if (min > t) min = t, min_b = b;
+					}
+					buf_update(e, &z, added[min_b]);
+				} else {
+					for (b = 0; b < n_added; ++b)
+						buf_update(e, &z, added[b]);
+				}
 			} else {
 				if (n_added == 0)
 					e->stack.a[z.k].tot_pen += e->opt->w_absent * (e->opt->max_end_ext - (z.i - end));
@@ -471,6 +482,7 @@ static void worker_ec(void *_data, long k, int tid)
 	bseq1_t *s = &data->seqs[k];
 	if (!es->opt->filter_mode) {
 		ecstat_t st;
+		if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
 		st = bfc_ec1(es->e[tid], s->seq, s->qual);
 		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
 	} else {
