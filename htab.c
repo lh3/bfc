@@ -154,6 +154,11 @@ bfc_ch_t *bfc_ch_restore(const char *fn)
 	return ch;
 }
 
+int bfc_ch_get_k(const bfc_ch_t *ch)
+{
+	return ch->k;
+}
+
 typedef struct {
 	uint64_t h0:56, ch:8;
 	uint64_t h1:56, cl:6, absent:2;

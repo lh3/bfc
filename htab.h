@@ -15,6 +15,7 @@ uint64_t bfc_ch_count(const bfc_ch_t *ch);
 int bfc_ch_hist(const bfc_ch_t *ch, uint64_t cnt[256], uint64_t high[64]);
 int bfc_ch_dump(const bfc_ch_t *ch, const char *fn);
 bfc_ch_t *bfc_ch_restore(const char *fn);
+int bfc_ch_get_k(const bfc_ch_t *ch);
 
 struct kh_kc_s;
 typedef struct kh_kc_s bfc_kc_t;

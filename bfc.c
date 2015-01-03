@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r91"
+#define BFC_VERSION "r92"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -114,8 +114,15 @@ int main(int argc, char *argv[])
 	}
 
 	if (opt.filter_mode) bf = (bfc_bf_t*)bfc_count(argv[optind], &opt);
-	else if (in_hash) ch = bfc_ch_restore(in_hash);
-	else ch = (bfc_ch_t*)bfc_count(argv[optind], &opt);
+	else if (!in_hash) ch = (bfc_ch_t*)bfc_count(argv[optind], &opt);
+	else {
+		ch = bfc_ch_restore(in_hash);
+		if (opt.k != bfc_ch_get_k(ch)) {
+			opt.k = bfc_ch_get_k(ch);
+			if (bfc_verbose >= 3)
+				fprintf(stderr, "[W::%s] hash table was constructed with a different k; set k to %d\n", __func__, opt.k);
+		}
+	}
 
 	if (ch) {
 		if (out_hash) bfc_ch_dump(ch, out_hash);
