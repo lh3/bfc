@@ -287,6 +287,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				os = bfc_kc_get(e->ch, e->kc, &x);
 				++(*n_lookups);
 				if (c->q && (os&0xff) >= e->opt->min_cov + 1 && c->lcov >= e->opt->min_cov + 1) fixed = 1;
+				else if (c->hcov >= e->opt->k>>1) fixed = 1;
 				if (bfc_verbose >= 4) {
 					fprintf(stderr, "     Original base:%c qual:%d fixed:%d count:", "ACGTN"[c->b], c->q, fixed);
 					if (os >= 0) fprintf(stderr, "%d,%d\n", os&0xff, os>>8&0x3f);
