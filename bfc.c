@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r95"
+#define BFC_VERSION "r96"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 	bfc_bf_t *bf = 0;
 	bfc_ch_t *ch = 0;
 	int i, c, no_ec = 0;
-	char *in_hash = 0, *out_hash = 0;
+	char *in_hash = 0, *out_hash = 0, *next_fn;
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
@@ -125,12 +125,13 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	next_fn = optind + 1 < argc? argv[optind+1] : argv[optind];
 	if (ch) {
 		if (out_hash) bfc_ch_dump(ch, out_hash);
-		if (!no_ec) bfc_correct(argv[optind], &opt, ch);
+		if (!no_ec) bfc_correct(next_fn, &opt, ch);
 		bfc_ch_destroy(ch);
 	} else if (bf) {
-		bfc_correct(argv[optind], &opt, bf);
+		bfc_correct(next_fn, &opt, bf);
 		bfc_bf_destroy(bf);
 	}
 
