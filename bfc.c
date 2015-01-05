@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r94"
+#define BFC_VERSION "r95"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -35,6 +35,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->w_absent = 3;
 	opt->w_absent_high = 1;
 	opt->max_path_diff = 15;
+	opt->max_heap = 100;
 }
 
 void bfc_opt_by_size(bfc_opt_t *opt, long size)

@@ -330,7 +330,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				break;
 			}
 			if (c || n_added == 1) {
-				if (n_added > 1 && e->heap.n > 2 * (end - start)) { // to prevent heap explosion
+				if (n_added > 1 && e->heap.n > e->opt->max_heap) { // to prevent heap explosion
 					int min_b = -1, min = INT_MAX;
 					for (b = 0; b < n_added; ++b) {
 						int t = weighted_penalty(e->opt, added[b]);

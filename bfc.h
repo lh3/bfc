@@ -19,12 +19,14 @@ typedef struct {
 
 	int n_shift, n_hashes;
 
+	int discard;
 	int max_end_ext;
 	int win_multi_ec; // no 2 high-qual corrections or 4 corrections in a window of this size
 	int min_cov; // a k-mer is considered solid if the count is no less than this
+
+	// these ec options cannot be changed on the command line
 	int w_ec, w_ec_high, w_absent, w_absent_high;
-	int max_path_diff;
-	int discard;
+	int max_path_diff, max_heap;
 } bfc_opt_t;
 
 extern int bfc_verbose;
