@@ -236,7 +236,7 @@ static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *p
 	}
 }
 
-static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
+static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end, uint64_t *n_lookups)
 {
 	echeap1_t z;
 	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
@@ -285,6 +285,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
 				os = bfc_kc_get(e->ch, e->kc, &x);
+				++(*n_lookups);
 				if (c->q && (os&0xff) >= e->opt->min_cov + 1 && c->lcov >= e->opt->min_cov + 1) fixed = 1;
 				if (bfc_verbose >= 4) {
 					fprintf(stderr, "     Original base:%c qual:%d fixed:%d count:", "ACGTN"[c->b], c->q, fixed);
@@ -305,6 +306,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					}
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_kc_get(e->ch, e->kc, &x);
+					++(*n_lookups);
 					if (bfc_verbose >= 4 && s >= 0)
 						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d\n", "ACGTN"[b], s&0xff, s>>8&0x3f);
 					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
@@ -371,12 +373,13 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 
 typedef struct {
 	uint32_t failed:1, n_ec:16, n_ec_high:15;
+	uint32_t n_lookups;
 } ecstat_t;
 
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
 	int i, start = 0, end = 0;
-	uint64_t r;
+	uint64_t r, n_lookups = 0;
 	ecstat_t s;
 
 	bfc_kc_clear(e->kc);
@@ -400,9 +403,9 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
-	if (bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n) < 0) return s;
+	if (bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n, &n_lookups) < 0) return s;
 	bfc_seq_revcomp(&e->seq);
-	if (bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n) < 0) return s;
+	if (bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n, &n_lookups) < 0) return s;
 	s.failed = 0;
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
@@ -433,6 +436,8 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			fputc('0' + (int)(10. * e->seq.a[i].lcov / e->opt->k + .499), stderr);
 		fputc('\n', stderr);
 	}
+	if (bfc_verbose >= 4)
+		fprintf(stderr, "* number of hash table lookups: %ld\n", (long)n_lookups);
 	return s;
 }
 
