@@ -147,7 +147,7 @@ typedef struct {
 	int tot_pen;
 	int i; // base position
 	int k; // position in the stack
-	int ecpos_high; // position of the last high-qual correction
+	int32_t ecpos_high[BFC_EC_HIST_HIGH];
 	int32_t ecpos[BFC_EC_HIST];
 	bfc_kmer_t x;
 } echeap1_t;
@@ -207,7 +207,10 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	r->i = prev->i + 1;
 	r->k = e->stack.n - 1;
 	r->x = prev->x;
-	r->ecpos_high = pen.ec_high? prev->i : prev->ecpos_high;
+	if (pen.ec_high) {
+		memcpy(r->ecpos_high + 1, prev->ecpos_high, (BFC_EC_HIST_HIGH - 1) * 4);
+		r->ecpos_high[0] = prev->i;
+	} else memcpy(r->ecpos_high, prev->ecpos_high, BFC_EC_HIST_HIGH * 4);
 	if (pen.ec) {
 		memcpy(r->ecpos + 1, prev->ecpos, (BFC_EC_HIST - 1) * 4);
 		r->ecpos[0] = prev->i;
@@ -251,8 +254,9 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		} else l = 0, z.x = bfc_kmer_null;
 	}
 	assert(z.i < end); // before calling this function, there must be at least one solid k-mer
-	z.k = -1; z.ecpos_high = -1;
+	z.k = -1;
 	for (i = 0; i < BFC_EC_HIST; ++i) z.ecpos[i] = -1;
+	for (i = 0; i < BFC_EC_HIST_HIGH; ++i) z.ecpos_high[i] = -1;
 	kv_push(echeap1_t, e->heap, z);
 	for (i = 0; i < seq->n; ++i) ec->a[i].b = seq->a[i].b, ec->a[i].ob = seq->a[i].ob;
 	// exhaustive error correction
@@ -266,8 +270,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		e->heap.a[0] = kv_pop(e->heap);
 		ks_heapdown_ec(0, e->heap.n, e->heap.a);
 		if (bfc_verbose >= 4)
-			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d last_base:%c ecpos_high:%d ecpos:[%d,%d,%d,%d,%d]\n",
-					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)], z.ecpos_high,
+			fprintf(stderr, "  => pos:%d stack_size:%ld heap_size:%ld penalty:%d last_base:%c ecpos_high:[%d,%d] ecpos:[%d,%d,%d,%d,%d]\n",
+					z.i, e->stack.n, e->heap.n, z.tot_pen, "ACGT"[(z.x.x[1]&1)<<1|(z.x.x[0]&1)], z.ecpos_high[0], z.ecpos_high[1],
 					z.ecpos[0], z.ecpos[1], z.ecpos[2], z.ecpos[3], z.ecpos[4]);
 		if (min_path >= 0 && z.tot_pen > min_path_pen + e->opt->max_path_diff) break;
 		if (z.i - end > e->opt->max_end_ext) stop = 1;
@@ -296,7 +300,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					int s;
 					bfc_kmer_t x = z.x;
 					if (c) { // not over the end
-						if (c->q && z.ecpos_high >= 0 && z.i - z.ecpos_high < e->opt->win_multi_ec) continue; // no close highQ corrections
+						if (c->q && z.ecpos_high[BFC_EC_HIST_HIGH-1] >= 0 && z.i - z.ecpos_high[BFC_EC_HIST_HIGH-1] < e->opt->win_multi_ec) continue; // no close highQ corrections
 						if (z.ecpos[BFC_EC_HIST-1] >= 0 && z.i - z.ecpos[BFC_EC_HIST-1] < e->opt->win_multi_ec) continue; // no clustered corrections
 					}
 					bfc_kmer_append(e->opt->k, x.x, b);

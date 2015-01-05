@@ -7,6 +7,7 @@
 
 #define BFC_MAX_PATHS 8
 #define BFC_EC_HIST 5
+#define BFC_EC_HIST_HIGH 2
 
 typedef struct {
 	int chunk_size;
