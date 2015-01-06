@@ -379,13 +379,16 @@ typedef struct {
 
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
-	int i, start = 0, end = 0;
+	int i, start = 0, end = 0, n_n = 0;
 	uint64_t r, n_lookups = 0;
 	ecstat_t s;
 
 	bfc_kc_clear(e->kc);
 	s.failed = 1, s.n_ec = 0, s.n_ec_high = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
+	for (i = 0; i < e->seq.n; ++i)
+		if (e->seq.a[i].ob > 3) ++n_n;
+	if (n_n > e->seq.n * .05) return s;
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
 	r = bfc_ec_best_island(e->opt->k, &e->seq);
 	if (r == 0) { // no solid k-mer
@@ -528,8 +531,8 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 	} else if (step == 1) {
 		ec_step_t *data = (ec_step_t*)_data;
 		kt_for(es->opt->n_threads, worker_ec, data, data->n_seqs);
-		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs)\n",
-				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
+		fprintf(stderr, "[M::%s @%.0f*%.1f%%] processed %d sequences\n", __func__, realtime() - bfc_real_time,
+				100.*cputime()/(realtime()-bfc_real_time+1e-6), data->n_seqs);
 		return data;
 	} else if (step == 2) {
 		ec_step_t *data = (ec_step_t*)_data;
@@ -558,6 +561,9 @@ void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 	ec_shared_t es;
 	memset(&es, 0, sizeof(ec_shared_t));
 	es.opt = opt;
+	if (bfc_verbose >= 3)
+		fprintf(stderr, "[M::%s @%.0f*%.1f%%] Starting...\n", __func__, realtime()-bfc_real_time,
+				100.*cputime()/(realtime()-bfc_real_time+1e-6));
 	if (!opt->filter_mode) {
 		int i, mode;
 		const bfc_ch_t *ch = (const bfc_ch_t*)ptr;

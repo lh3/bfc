@@ -2,15 +2,16 @@ var file = arguments.length? new File(arguments[0]) : new File();
 var buf = new Bytes();
 var re = /(\d+)([MIDNSH])/g;
 
-var n_err_bases = 0, n_err_reads = 0, tot_reads = 0, n_chimeric = 0, n_chimeric_reads = 0, n_unmapped = 0, n_perfect = 0, tot_clip = 0;
+var n_err_bases = 0, n_err_reads = 0, tot_reads = 0, n_chimeric = 0, n_chimeric_reads = 0, n_unmapped = 0, n_perfect = 0, n_clipped = 0, tot_clip = 0;
 var last = null, last_nm = 0, last_seg = 0, last_clip = 0;
 
 function count(last_nm, last_seg, last_clip)
 {
 	++tot_reads;
 	tot_clip += last_clip;
-	if (last_nm == 0 && last_seg == 1) ++n_perfect;
+	if (last_nm == 0 && last_clip == 0 && last_seg == 1) ++n_perfect;
 	if (last_nm > 0) ++n_err_reads, n_err_bases += last_nm;
+	if (last_clip != 0) ++n_clipped;
 	if (last_seg == 0) ++n_unmapped;
 	else if (last_seg > 1) ++n_chimeric_reads, n_chimeric += last_seg - 1;
 }
@@ -44,4 +45,5 @@ print("# chimeric reads:    " + n_chimeric_reads);
 print("# chimeric events:   " + n_chimeric);
 print("# reads w/ base err: " + n_err_reads);
 print("# error bases:       " + n_err_bases);
+print("# clipped reads:     " + n_clipped);
 print("# clipped bases:     " + tot_clip);
