@@ -86,7 +86,7 @@ if (arguments.length < 2) {
 	while ((st1 = read1(f1, buf, last1)) != null) {
 		st2 = read1(f2, buf, last2);
 		if (st2 == null) throw Error("the 2nd file has fewer reads");
-		if (st1.name != st2.name) throw Error("different read names: "+st1.name+ " vs "+st2.name);
+		//if (st1.name != st2.name) throw Error("different read names: "+st1.name+ " vs "+st2.name);
 		if (st1.nm != st2.nm || st1.cliplen != st2.cliplen || st1.n_segs != st2.n_segs) {
 			var t;
 			if (st1.nm <= st2.nm && st1.cliplen <= st2.cliplen && st1.n_segs == 1) {
