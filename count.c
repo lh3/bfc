@@ -101,12 +101,18 @@ static void *bfc_count_cb(void *shared, int step, void *_data)
 		else free(ret);
 	} else if (step == 1) {
 		int i;
+		double rt, eff;
 		cnt_step_t *data = (cnt_step_t*)_data;
 		kt_for(cs->opt->n_threads, worker_count, data, data->n_seqs);
-		fprintf(stderr, "[M::%s] processed %d sequences (CPU/real time: %.3f/%.3f secs",
-				__func__, data->n_seqs, cputime(), realtime() - bfc_real_time);
-		if (cs->ch) fprintf(stderr, "; # distinct k-mers: %ld", (long)bfc_ch_count(cs->ch));
-		fprintf(stderr, ")\n");
+		rt = realtime() - bfc_real_time;
+		eff = 100. * cputime() / (rt + 1e-6);
+		if (cs->ch) {
+			fprintf(stderr, "[M::%s @%.0f*%.1f%%] processed %d sequences; # distinct k-mers: %ld\n",
+					__func__, rt, eff, data->n_seqs, (long)bfc_ch_count(cs->ch));
+		} else {
+			fprintf(stderr, "[M::%s @%.0f*%.1f%%] processed %d sequences\n",
+					__func__, rt, eff, data->n_seqs);
+		}
 		for (i = 0; i < cs->opt->n_threads; ++i)
 			bfc_kmer_bufclear(cs, 1, i);
 		for (i = 0; i < data->n_seqs; ++i) {
