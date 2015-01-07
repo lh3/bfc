@@ -4,7 +4,7 @@ var re = /(\d+)([MIDNSH])/g;
 
 function read1(f, b, t)
 {
-	var st = {}, lines = [], m, name;
+	var lines = [], m, name;
 
 	if (t == null) {
 		while (f.readline(b) >= 0) {
@@ -27,10 +27,7 @@ function read1(f, b, t)
 		lines.push(t);
 	}
 
-	st.next = t;
-	st.n_segs = 0;
-	st.nm = 0;
-	st.cliplen = 0;
+	var st = { name:name, next:t, n_segs:0, nm:0, cliplen:0 };
 	t = lines[0];
 	if ((t[1]&4) == 0) {
 		while ((m = re.exec(t[5])) != null)
