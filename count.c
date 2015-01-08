@@ -132,9 +132,9 @@ void *bfc_count(const char *fn, const bfc_opt_t *opt)
 
 	memset(&cs, 0, sizeof(cnt_shared_t));
 	cs.opt = opt;
-	cs.bf = bfc_bf_init(opt->n_shift, opt->n_hashes);
+	cs.bf = bfc_bf_init(opt->bf_shift, opt->n_hashes);
 	if (!opt->filter_mode) {
-		cs.ch = bfc_ch_init(opt->k);
+		cs.ch = bfc_ch_init(opt->k, opt->l_pre);
 		cs.n_buf = calloc(opt->n_threads, sizeof(int));
 		cs.buf = calloc(opt->n_threads, sizeof(void*));
 		for (i = 0; i < opt->n_threads; ++i)
@@ -146,7 +146,7 @@ void *bfc_count(const char *fn, const bfc_opt_t *opt)
 		free(cs.buf); free(cs.n_buf);
 		ret = (void*)cs.ch;
 	} else {
-		cs.bf_high = bfc_bf_init(opt->n_shift, opt->n_hashes);
+		cs.bf_high = bfc_bf_init(opt->bf_shift, opt->n_hashes);
 		cs.ks = bseq_open(fn);
 		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_count_cb, &cs, 2);
 		bseq_close(cs.ks);

@@ -5,6 +5,9 @@
 #include "htab.h"
 #include "bseq.h"
 
+#define BFC_MAX_KMER     37
+#define BFC_MAX_BF_SHIFT 37
+
 #define BFC_MAX_PATHS 8
 #define BFC_EC_HIST 5
 #define BFC_EC_HIST_HIGH 2
@@ -12,12 +15,12 @@
 typedef struct {
 	int chunk_size;
 	int n_threads, no_mt_io;
-	int k, q;
+	int q, k;
 
 	int filter_mode;
 	float min_frac;
 
-	int n_shift, n_hashes;
+	int l_pre, bf_shift, n_hashes;
 
 	int discard;
 	int max_end_ext;

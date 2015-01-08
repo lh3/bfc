@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r101"
+#define BFC_VERSION "r107"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -19,9 +19,10 @@ void bfc_opt_init(bfc_opt_t *opt)
 	memset(opt, 0, sizeof(bfc_opt_t));
 	opt->chunk_size = 100000000;
 	opt->n_threads = 1;
-	opt->k = 33;
 	opt->q = 20;
-	opt->n_shift = 33;
+	opt->k = 33;
+	opt->l_pre = 20;
+	opt->bf_shift = 33;
 	opt->n_hashes = 4;
 
 	opt->min_frac = .9;
@@ -40,9 +41,15 @@ void bfc_opt_init(bfc_opt_t *opt)
 
 void bfc_opt_by_size(bfc_opt_t *opt, long size)
 {
-	opt->k = (int)(log(size) / log(2) * 1.2);
-	if (opt->k > 37) opt->k = 37;
-	opt->n_shift = opt->k;
+	double bits;
+	bits = log(size) / log(2);
+	opt->k = (int)(bits * 1.3);
+	if ((opt->k&1) == 0) ++opt->k; // should always be an odd number
+	if (opt->k > BFC_MAX_KMER)
+		opt->k = BFC_MAX_KMER;
+	opt->bf_shift = (int)(bits + 8);
+	if (opt->bf_shift > BFC_MAX_BF_SHIFT)
+		opt->bf_shift = BFC_MAX_BF_SHIFT;
 }
 
 static void usage(FILE *fp, bfc_opt_t *o)
@@ -52,7 +59,7 @@ static void usage(FILE *fp, bfc_opt_t *o)
 	fprintf(fp, "  -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
 	fprintf(fp, "  -k INT       k-mer length [%d]\n", o->k);
 	fprintf(fp, "  -t INT       number of threads [%d]\n", o->n_threads);
-	fprintf(fp, "  -b INT       set Bloom filter size to pow(2,INT) bits [%d]\n", o->n_shift);
+	fprintf(fp, "  -b INT       set Bloom filter size to pow(2,INT) bits [%d]\n", o->bf_shift);
 	fprintf(fp, "  -H INT       use INT hash functions for Bloom filter [%d]\n", o->n_hashes);
 	fprintf(fp, "  -d FILE      dump hash table to FILE [null]\n");
 	fprintf(fp, "  -E           skip error correction\n");
@@ -79,7 +86,7 @@ int main(int argc, char *argv[])
 		else if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
 		else if (c == 'q') opt.q = atoi(optarg);
-		else if (c == 'b') opt.n_shift = atoi(optarg);
+		else if (c == 'b') opt.bf_shift = atoi(optarg);
 		else if (c == 't') opt.n_threads = atoi(optarg);
 		else if (c == 'H') opt.n_hashes = atoi(optarg);
 		else if (c == 'c') opt.min_cov = atoi(optarg);
@@ -104,7 +111,7 @@ int main(int argc, char *argv[])
 			else if (*p == 'K' || *p == 'k') x *= 1e3;
 			if (c == 's') {
 				bfc_opt_by_size(&opt, (long)x + 1);
-				fprintf(stderr, "[M::%s] set k to %d\n", __func__, opt.k);
+				fprintf(stderr, "[M::%s] applied `-k %d -b %d'\n", __func__, opt.k, opt.bf_shift);
 			} else if (c == 'L') opt.chunk_size = (long)x + 1;
 		}
 	}
@@ -114,13 +121,19 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	if (opt.k > BFC_MAX_KMER) {
+		if (bfc_verbose >= 2)
+			fprintf(stderr, "[W::%s] maximum k-mer size is %d; set k to %d\n", __func__, BFC_MAX_KMER, BFC_MAX_KMER);
+		opt.k = BFC_MAX_KMER;
+	}
+
 	if (opt.filter_mode) bf = (bfc_bf_t*)bfc_count(argv[optind], &opt);
 	else if (!in_hash) ch = (bfc_ch_t*)bfc_count(argv[optind], &opt);
 	else {
 		ch = bfc_ch_restore(in_hash);
 		if (opt.k != bfc_ch_get_k(ch)) {
 			opt.k = bfc_ch_get_k(ch);
-			if (bfc_verbose >= 3)
+			if (bfc_verbose >= 2)
 				fprintf(stderr, "[W::%s] hash table was constructed with a different k; set k to %d\n", __func__, opt.k);
 		}
 	}

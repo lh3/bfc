@@ -9,8 +9,6 @@
 KHASH_INIT(cnt, uint64_t, char, 0, _cnt_hash, _cnt_eq)
 typedef khash_t(cnt) cnthash_t;
 
-#define BFC_CH_KEYBITS 50
-
 struct bfc_ch_s {
 	int k;
 	cnthash_t **h;
@@ -18,16 +16,14 @@ struct bfc_ch_s {
 	int l_pre;
 };
 
-bfc_ch_t *bfc_ch_init(int k)
+bfc_ch_t *bfc_ch_init(int k, int l_pre)
 {
 	bfc_ch_t *ch;
 	int i;
-	if (k < 2) return 0;
+	if (k * 2 - l_pre > BFC_CH_KEYBITS)
+		l_pre = k * 2 - BFC_CH_KEYBITS;
 	ch = calloc(1, sizeof(bfc_ch_t));
-	ch->k = k;
-	ch->l_pre = k*2 - BFC_CH_KEYBITS; // TODO: this should be improved!!!
-	if (ch->l_pre < 1) ch->l_pre = 1;
-	if (ch->l_pre > k - 1) ch->l_pre = k - 1;
+	ch->k = k, ch->l_pre = l_pre;
 	ch->h = calloc(1<<ch->l_pre, sizeof(void*));
 	for (i = 0; i < 1<<ch->l_pre; ++i)
 		ch->h[i] = kh_init(cnt);
@@ -43,12 +39,27 @@ void bfc_ch_destroy(bfc_ch_t *ch)
 	free(ch->h); free(ch);
 }
 
-int bfc_ch_insert(bfc_ch_t *ch, uint64_t x[2], int is_high, int forced)
+static inline cnthash_t *get_subhash(const bfc_ch_t *ch, const uint64_t x[2], uint64_t *key)
+{
+	if (ch->k <= 32) {
+		int t = ch->k * 2 - ch->l_pre;
+		uint64_t z = x[0] << ch->k | x[1];
+		*key = (z & ((1ULL<<t) - 1)) << 14 | 1;
+		return ch->h[z>>t];
+	} else {
+		int t = ch->k - ch->l_pre;
+		*key = ((x[0] & ((1ULL<<t) - 1)) << ch->k | x[1]) << 14 | 1;
+		return ch->h[x[0]>>t];
+	}
+}
+
+int bfc_ch_insert(bfc_ch_t *ch, const uint64_t x[2], int is_high, int forced)
 {
 	int absent;
-	cnthash_t *h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
-	uint64_t key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
+	uint64_t key;
+	cnthash_t *h;
 	khint_t k;
+	h = get_subhash(ch, x, &key);
 	if (__sync_lock_test_and_set(&h->lock, 1)) {
 		if (forced) // then wait until the hash table is unlocked by the thread using it
 			while (__sync_lock_test_and_set(&h->lock, 1))
@@ -71,8 +82,7 @@ int bfc_ch_get(const bfc_ch_t *ch, const uint64_t x[2])
 	uint64_t key;
 	cnthash_t *h;
 	khint_t itr;
-	h = ch->h[x[0] & ((1ULL<<ch->l_pre) - 1)];
-	key = (x[0] >> ch->l_pre | x[1] << (ch->k - ch->l_pre)) << 14 | 1;
+	h = get_subhash(ch, x, &key);
 	itr = kh_get(cnt, h, key);
 	return itr == kh_end(h)? -1 : kh_key(h, itr) & 0x3fff;
 }
@@ -136,7 +146,7 @@ bfc_ch_t *bfc_ch_restore(const char *fn)
 
 	if ((fp = fopen(fn, "rb")) == 0) return 0;
 	fread(t, 4, 2, fp);
-	ch = bfc_ch_init(t[0]);
+	ch = bfc_ch_init(t[0], t[1]);
 	assert((int)t[1] == ch->l_pre);
 	for (i = 0; i < 1<<ch->l_pre; ++i) {
 		cnthash_t *h = ch->h[i];
