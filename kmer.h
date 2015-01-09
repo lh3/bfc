@@ -39,11 +39,13 @@ static inline uint64_t bfc_hash_64(uint64_t key, uint64_t mask)
 
 static inline uint64_t bfc_kmer_hash(int k, const uint64_t x[4], uint64_t h[2])
 {
-	int flipped = !(x[0] + x[1] < x[2] + x[3]);
-	uint64_t mask = (1ULL<<k) - 1;
-	h[0] = bfc_hash_64(x[flipped<<1|0] ^ x[flipped<<1|1], mask);
-	h[1] = bfc_hash_64(h[0] ^ x[flipped<<1|1], mask);
-	return (h[0] ^ h[1]) << k | ((h[0] + h[1]) & mask);
+	int t = k>>1, u = ((x[1]>>t&1) > (x[3]>>t&1)); // the middle base is always different
+	uint64_t mask = (1ULL<<k) - 1, ret;
+	h[0] = bfc_hash_64((x[u<<1|0] + x[u<<1|1]) & mask, mask);
+	h[1] = bfc_hash_64(h[0] ^ x[u<<1|1], mask);
+	ret = (h[0] ^ h[1]) << k | ((h[0] + h[1]) & mask);
+	h[0] = (h[0] + h[1]) & mask;
+	return ret;
 }
 
 #endif
