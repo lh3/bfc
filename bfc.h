@@ -17,7 +17,7 @@ typedef struct {
 	int n_threads, no_mt_io;
 	int q, k;
 
-	int filter_mode;
+	int filter_mode, no_qual;
 	float min_frac;
 
 	int l_pre, bf_shift, n_hashes;

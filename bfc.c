@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r112"
+#define BFC_VERSION "r114"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -66,7 +66,8 @@ static void usage(FILE *fp, bfc_opt_t *o)
 	fprintf(fp, "  -r FILE      restore hash table from FILE [null]\n");
 	fprintf(fp, "  -w INT       no more than %d ec or 2 highQ ec in INT-bp window [%d]\n", BFC_EC_HIST, o->win_multi_ec);
 	fprintf(fp, "  -c INT       min k-mer coverage [%d]\n", o->min_cov);
-	fprintf(fp, "  -D           discard uncorrectable reads\n");
+//	fprintf(fp, "  -D           discard uncorrectable reads\n");
+	fprintf(fp, "  -Q           force FASTA output\n");
 	fprintf(fp, "  -1           drop reads containing unique k-mers\n");
 	fprintf(fp, "  -v           show version number\n");
 	fprintf(fp, "  -h           show command line help\n");
@@ -82,7 +83,7 @@ int main(int argc, char *argv[])
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
-	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1")) >= 0) {
+	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1Q")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
@@ -94,6 +95,7 @@ int main(int argc, char *argv[])
 		else if (c == 'w') opt.win_multi_ec = atoi(optarg);
 		else if (c == 'D') opt.discard = 1;
 		else if (c == '1') opt.filter_mode = 1;
+		else if (c == 'Q') opt.no_qual = 1;
 		else if (c == 'J') opt.no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
 		else if (c == 'V') bfc_verbose = atoi(optarg);

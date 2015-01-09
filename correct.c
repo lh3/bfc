@@ -428,7 +428,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			if (e->seq.a[i].q) ++s.n_ec_high;
 		}
 		seq[i] = (is_diff? "acgtn" : "ACGTN")[e->seq.a[i].b];
-		qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
+		if (qual) qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
 	}
 	if (bfc_verbose >= 4) {
 		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
@@ -539,15 +539,16 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		int i;
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
+			int is_fq = (s->qual && !es->opt->no_qual);
 			if (!es->opt->filter_mode) {
 				if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
-				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", s->qual? '@' : '>', s->name,
+				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
 					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
-				printf("%c%s\n%s\n", s->qual? '@' : '>', s->name, s->seq);
+				printf("%c%s\n%s\n", is_fq? '@' : '>', s->name, s->seq);
 			}
-			if (s->qual) printf("+\n%s\n", s->qual);
+			if (is_fq) printf("+\n%s\n", s->qual);
 bfc_ec_cb_free:
 			free(s->seq); free(s->qual); free(s->name);
 		}
