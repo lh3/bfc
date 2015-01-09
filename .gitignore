@@ -3,4 +3,5 @@
 *.a
 *.o
 bfc
+hash2cnt
 a.out
