@@ -1,6 +1,8 @@
 #ifndef BFC_KMER_H
 #define BFC_KMER_H
 
+#include <stdint.h>
+
 typedef struct {
 	uint64_t x[4];
 } bfc_kmer_t;
@@ -37,6 +39,43 @@ static inline uint64_t bfc_hash_64(uint64_t key, uint64_t mask)
 	return key;
 }
 
+static inline uint64_t bfc_hash_64_inv(uint64_t key, uint64_t mask)
+{
+	uint64_t tmp;
+ 
+	// Invert key = key + (key << 31)
+	tmp = (key - (key << 31));
+	key = (key - (tmp << 31)) & mask;
+ 
+	// Invert key = key ^ (key >> 28)
+	tmp = key ^ key >> 28;
+	key = key ^ tmp >> 28;
+ 
+	// Invert key *= 21
+	key = (key * 14933078535860113213ull) & mask;
+ 
+	// Invert key = key ^ (key >> 14)
+	tmp = key ^ key >> 14;
+	tmp = key ^ tmp >> 14;
+	tmp = key ^ tmp >> 14;
+	key = key ^ tmp >> 14;
+ 
+	// Invert key *= 265
+	key = (key * 15244667743933553977ull) & mask;
+ 
+	// Invert key = key ^ (key >> 24)
+	tmp = key ^ key >> 24;
+	key = key ^ tmp >> 24;
+ 
+	// Invert key = (~key) + (key << 21)
+	tmp = ~key;
+	tmp = ~(key - (tmp << 21));
+	tmp = ~(key - (tmp << 21));
+	key = ~(key - (tmp << 21)) & mask;
+ 
+	return key;
+}
+
 static inline uint64_t bfc_kmer_hash(int k, const uint64_t x[4], uint64_t h[2])
 {
 	int t = k>>1, u = ((x[1]>>t&1) > (x[3]>>t&1)); // the middle base is always different
@@ -46,6 +85,22 @@ static inline uint64_t bfc_kmer_hash(int k, const uint64_t x[4], uint64_t h[2])
 	ret = (h[0] ^ h[1]) << k | ((h[0] + h[1]) & mask);
 	h[0] = (h[0] + h[1]) & mask;
 	return ret;
+}
+
+static inline void bfc_kmer_hash_inv(int k, const uint64_t h[2], uint64_t y[2])
+{
+	uint64_t mask = (1ULL<<k) - 1, t = (h[0] - h[1]) & mask;
+	y[1] = bfc_hash_64_inv(h[1], mask) ^ t;
+	y[0] = (bfc_hash_64_inv(t, mask) - y[1]) & mask;
+}
+
+static inline char *bfc_kmer_2str(int k, const uint64_t y[2], char *buf)
+{
+	int l;
+	for (l = 0; l < k; ++l)
+		buf[k - 1 - l] = "ACGT"[(y[1]>>l&1)<<1 | (y[0]>>l&1)];
+	buf[k] = 0;
+	return buf;
 }
 
 #endif
