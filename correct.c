@@ -374,7 +374,6 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 
 typedef struct {
 	uint32_t failed:1, n_ec:16, n_ec_high:15;
-	uint32_t n_lookups;
 } ecstat_t;
 
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)

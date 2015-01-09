@@ -5,11 +5,13 @@
 bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes)
 {
 	bfc_bf_t *b;
+	void *ptr;
 	if (n_shift + BFC_BLK_SHIFT > 64 || n_shift < BFC_BLK_SHIFT) return 0;
 	b = calloc(1, sizeof(bfc_bf_t));
 	b->n_shift = n_shift;
 	b->n_hashes = n_hashes;
-	posix_memalign((void**)&b->b, 1<<(BFC_BLK_SHIFT-3), 1ULL<<(n_shift-3));
+	posix_memalign(&ptr, 1<<(BFC_BLK_SHIFT-3), 1ULL<<(n_shift-3));
+	b->b = ptr;
 	bzero(b->b, 1ULL<<(n_shift-3));
 	return b;
 }

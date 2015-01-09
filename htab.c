@@ -192,6 +192,7 @@ int bfc_kc_get(const bfc_ch_t *ch, bfc_kc_t *kc, const bfc_kmer_t *z)
 		int absent;
 		bfc_kcelem_t key, *p;
 		key.h0 = x[0], key.h1 = x[1];
+		key.ch = key.cl = key.absent = 0; // no effect; only to suppress gcc warnings
 		k = kh_put(kc, kc, key, &absent);
 		p = &kh_key(kc, k);
 		if (absent) {
