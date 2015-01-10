@@ -5,7 +5,7 @@
 bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes)
 {
 	bfc_bf_t *b;
-	void *ptr;
+	void *ptr = 0;
 	if (n_shift + BFC_BLK_SHIFT > 64 || n_shift < BFC_BLK_SHIFT) return 0;
 	b = calloc(1, sizeof(bfc_bf_t));
 	b->n_shift = n_shift;

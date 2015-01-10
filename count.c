@@ -107,10 +107,10 @@ static void *bfc_count_cb(void *shared, int step, void *_data)
 		rt = realtime() - bfc_real_time;
 		eff = 100. * cputime() / (rt + 1e-6);
 		if (cs->ch) {
-			fprintf(stderr, "[M::%s @%.0f*%.1f%%] processed %d sequences; # distinct k-mers: %ld\n",
+			fprintf(stderr, "[M::%s @%.1f*%.1f%%] processed %d sequences; # distinct k-mers: %ld\n",
 					__func__, rt, eff, data->n_seqs, (long)bfc_ch_count(cs->ch));
 		} else {
-			fprintf(stderr, "[M::%s @%.0f*%.1f%%] processed %d sequences\n",
+			fprintf(stderr, "[M::%s @%.1f*%.1f%%] processed %d sequences\n",
 					__func__, rt, eff, data->n_seqs);
 		}
 		for (i = 0; i < cs->opt->n_threads; ++i)

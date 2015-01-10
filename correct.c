@@ -500,7 +500,7 @@ static void worker_ec(void *_data, long k, int tid)
 	} else {
 		uint64_t max;
 		max = max_streak(es->opt->k, es->bf, s);
-		if ((double)((max>>32) + es->opt->k) / s->l_seq > es->opt->min_frac) {
+		if (max>>32 && (double)((max>>32) + es->opt->k) / s->l_seq > es->opt->min_frac) {
 			int start = (uint32_t)max, end = start + (max>>32);
 			start -= es->opt->k - 1;
 			assert(start >= 0 && end <= s->l_seq);
@@ -530,7 +530,7 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 	} else if (step == 1) {
 		ec_step_t *data = (ec_step_t*)_data;
 		kt_for(es->opt->n_threads, worker_ec, data, data->n_seqs);
-		fprintf(stderr, "[M::%s @%.0f*%.1f%%] processed %d sequences\n", __func__, realtime() - bfc_real_time,
+		fprintf(stderr, "[M::%s @%.1f*%.1f%%] processed %d sequences\n", __func__, realtime() - bfc_real_time,
 				100.*cputime()/(realtime()-bfc_real_time+1e-6), data->n_seqs);
 		return data;
 	} else if (step == 2) {
@@ -562,7 +562,7 @@ void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 	memset(&es, 0, sizeof(ec_shared_t));
 	es.opt = opt;
 	if (bfc_verbose >= 3)
-		fprintf(stderr, "[M::%s @%.0f*%.1f%%] Starting...\n", __func__, realtime()-bfc_real_time,
+		fprintf(stderr, "[M::%s @%.1f*%.1f%%] Starting...\n", __func__, realtime()-bfc_real_time,
 				100.*cputime()/(realtime()-bfc_real_time+1e-6));
 	if (!opt->filter_mode) {
 		int i, mode;
