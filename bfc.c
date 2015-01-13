@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r116"
+#define BFC_VERSION "r118"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -124,11 +124,12 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (opt.k > BFC_MAX_KMER) {
+	if (opt.k > BFC_MAX_KMER && !opt.filter_mode) {
 		if (bfc_verbose >= 2)
-			fprintf(stderr, "[W::%s] maximum k-mer size is %d; set k to %d\n", __func__, BFC_MAX_KMER, BFC_MAX_KMER);
+			fprintf(stderr, "[W::%s] in the correction mode, the maximum k-mer size is %d; set k to %d\n", __func__, BFC_MAX_KMER, BFC_MAX_KMER);
 		opt.k = BFC_MAX_KMER;
 	}
+	if (opt.k > 63) opt.k = 63;
 
 	if (opt.filter_mode) bf = (bfc_bf_t*)bfc_count(argv[optind], &opt);
 	else if (!in_hash) ch = (bfc_ch_t*)bfc_count(argv[optind], &opt);
