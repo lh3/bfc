@@ -21,17 +21,17 @@ the orginal) in comparison to others.
 
 BFC can be invoked as:
 ```sh
-bfc -s 3g reads.fq.gz
+bfc -s 3g -t16 reads.fq.gz | gzip -1 > corrected.fq.gz
 ```
 where option `-s` specifies the approximate size of the genome. It is also
 possible to use one set of reads to correct another set:
 ```sh
-bfc -s 3g readset1.fq.gz readset2.fq.gz
+bfc -s 3g readset1.fq.gz readset2.fq.gz | gzip -1 > corrected_readset2.fq.gz
 ```
 BFC also offers an option to trim reads containing unique k-mers (don't switch
 `-s` and `-k` as some options are ordered):
 ```sh
-bfc -s 3g -1 -k 51 corrected_reads.fq.gz
+bfc -1 -s 3g -k51 -t16 corrected.fq.gz | gzip -1 > trimmed.fq.gz
 ```
 This command line keeps k-mer occuring twice or more in a bloom filter (with
 some false positives) and identifies the longest stretch in a read that has
