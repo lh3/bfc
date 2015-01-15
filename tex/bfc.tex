@@ -1,0 +1,122 @@
+\documentclass{bioinfo}
+\copyrightyear{2015}
+\pubyear{2015}
+
+\usepackage{amsmath}
+\usepackage[ruled,vlined]{algorithm2e}
+\usepackage{natbib}
+
+\bibliographystyle{apalike}
+
+
+\begin{document}
+\firstpage{1}
+
+\title[Error Correction for Illumina Data]{Correcting Illumina sequencing errors for human data}
+
+\author[Li]{Heng Li}
+
+\address{Broad Institute, 75 Ames Street, Cambridge, MA 02142, USA}
+
+\history{Received on XXXXX; revised on XXXXX; accepted on XXXXX}
+\editor{Associate Editor: XXXXXXX}
+\maketitle
+
+\begin{abstract}
+\section{Summary:}
+
+\section{Availability and implementation:} https://github.com/lh3/bfc
+
+\section{Contact:} hengli@broadinstitute.org
+\end{abstract}
+
+\section{Introduction}
+
+\begin{methods}
+\section{Methods}
+The BFC error correction algorithm is a $k$-mer spectrum
+algorithm~\citep{Pevzner:2001vn}, which takes a list of trusted $k$-mers and
+attempts to find a corrected sequence such that each $k$-mer on the corrected
+sequence is trusted. There are multiple ways to implement this basic idea.
+Algorithm~1 gives the BFC implementation. It uses a 4-tuple as a state of
+correction. A 4-tuple $(i,W,\mathcal{C},p)$ consists of the position $i$ of the
+last visited base, the preceding \mbox{($k$-1)--mer} $W$ ending at $i$, the set
+$\mathcal{C}$ of previous corrected positions and bases (called a
+\emph{solution}) and the penalty calculated for solution $\mathcal{C}$. In the
+pseudocode, either a correction or an untrusted $k$-mer incurs a penalty 1
+(line~2 and~3). BFC keeps all possible states in a priority queue
+$\mathcal{Q}$. At each iteration, it retrieves the state $(i,W,\mathcal{C},p)$
+with the lowest penalty $p$ and adds a new state $(i+1,W[1,k-1]\circ
+a,\mathcal{C}',p')$ if $a$ is the read base or $W\circ a$ is a trusted $k$-mer
+($\circ$ is the string concatenation operator). We find the optimal solution
+when we come to the end of the read (line~1). This algorithm may change a base
+on a trusted $k$-mer if doing this leads to more trusted $k$-mers later.  Some
+algorithms such as BLESS~\citep{Heo:2014aa} and Lighter~\citep{Song:2014aa}
+apparently do not backtrack to change a wrong base assignment at an early
+iteration.
+
+Algorithm~1 is exponential in the length of the read in the worst case.  In
+implementation, we skip line~3 if the read base is Q20 and the $k$-mer ending
+at it is trusted, or if five bases or two Q20 bases have been corrected in the
+last 10bp window by default. These heuristics reduce the search space.  If BFC
+still takes too many iterations before finding an optimal solution, we stop the
+search and mark the read not correctable.
+
+\begin{algorithm}[ht]
+\DontPrintSemicolon
+\footnotesize
+\KwIn{K-mer size $k$, trusted k-mer hash table $\mathcal{H}$ and one string $S$}
+\KwOut{Set of corrected positions and bases changed to}
+\BlankLine
+\textbf{Function} {\sc CorrectErrors}$(k, \mathcal{H}, S)$
+\Begin {
+	$\mathcal{Q}\gets${\sc HeapInit}$()$\;
+	{\sc HeapPush}$(\mathcal{Q}, (k-2, S[0,k-2], \emptyset, 0))$\;
+	\While{$A$ is not empty} {
+		$(i, W, \mathcal{C}, p)\gets${\sc HeapPopBest}$(\mathcal{Q})$\;
+		$i\gets i+1$\;
+		\nl\lIf{$i=|S|$} { {\bf return} $\mathcal{C}$ }
+		\For{$a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}$} {
+			$(p',W')\gets (p,W\circ a)$\;
+			\uIf {$a=S[i]$} {
+				\nl\lIf{$W'\not\in \mathcal{H}$} {$p'\gets p'+1$}
+				{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p'))$\;
+			} \ElseIf{$W'\in \mathcal{H}$}{
+				\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}\cup\{(i,a)\},p'+1))$\;
+			}
+		}
+	}
+}
+\caption{Error correction for one string in one direction}
+\end{algorithm}
+
+\end{methods}
+
+\section{Results and Discussions}
+\begin{table}[ht]
+\processtable{Performance of error correction for 4 million human reads}
+{\footnotesize
+\begin{tabular}{lrccccrc}
+\toprule
+Prog.     & Time & RAM   & Perfect & Chimeric & Better & Worse & Ambi. \\
+\midrule
+BFC       & 7.4h & 63.5G & {\bf 3.04M} & {\bf 12.5k} & {\bf 820k}   & {\bf 7.1k}  & {\bf 14.3k} \\
+BLESS     & 6.5h & 22.3G & 2.91M   & 13.1k    & 666k   & 15.2k & 14.8k \\
+Fermi2    &17.2h & 64.7G & \\
+Lighter   &{\bf 3.2h}&{\bf 13.4G}&2.98M&13.0k & 743k   & 22.4k & 21.8k \\
+Musket    &\\
+\botrule
+\end{tabular}}{Column meaning: the wall-clock \emph{time} when 16 threads
+are specified if possible, the peak \emph{RAM} measured by GNU time, number of
+reads mapped \emph{perfectly} to hs37d5 by BWA-MEM, number of \emph{chimeric}
+reads, number of corrected reads \emph{better} than the original reads, number
+of reads \emph{worse} than the original and number of corrected reads with some
+aspects better but some worse than the original reads (column \emph{Ambi}).}
+
+\end{table}
+
+\section*{Acknowledgement}
+\paragraph{Funding\textcolon} NHGRI U54HG003037; NIH GM100233
+
+\bibliography{bfc}
+\end{document}

@@ -1,0 +1,18 @@
+.SUFFIXES: .gp .tex .eps .pdf .eps.gz
+
+.eps.pdf:
+		epstopdf --outfile $@ $<
+
+.eps.gz.pdf:
+		gzip -dc $< | epstopdf --filter > $@
+
+.pdf.eps:
+		pdftops -eps $< $@
+
+all:bfc.pdf
+
+bfc.pdf:bfc.tex bfc.bib
+		pdflatex bfc; bibtex bfc; pdflatex bfc; pdflatex bfc;
+
+clean:
+		rm -fr *.toc *.aux *.bbl *.blg *.idx *.log *.out *~
