@@ -4,6 +4,9 @@
 
 \usepackage{amsmath}
 \usepackage[ruled,vlined]{algorithm2e}
+\newcommand\mycommfont[1]{\footnotesize\rmfamily{\it #1}}
+\SetCommentSty{mycommfont}
+\SetKwComment{Comment}{$\triangleright$\ }{}
 \usepackage{natbib}
 
 \bibliographystyle{apalike}
@@ -38,51 +41,51 @@ The BFC error correction algorithm is a $k$-mer spectrum
 algorithm~\citep{Pevzner:2001vn}, which takes a list of trusted $k$-mers and
 attempts to find a corrected sequence such that each $k$-mer on the corrected
 sequence is trusted. There are multiple ways to implement this basic idea.
-Algorithm~1 gives the BFC implementation. It uses a 4-tuple as a state of
-correction. A 4-tuple $(i,W,\mathcal{C},p)$ consists of the position $i$ of the
-last visited base, the preceding \mbox{($k$-1)--mer} $W$ ending at $i$, the set
-$\mathcal{C}$ of previous corrected positions and bases (called a
-\emph{solution}) and the penalty calculated for solution $\mathcal{C}$. In the
-pseudocode, either a correction or an untrusted $k$-mer incurs a penalty 1
-(line~2 and~3). BFC keeps all possible states in a priority queue
-$\mathcal{Q}$. At each iteration, it retrieves the state $(i,W,\mathcal{C},p)$
-with the lowest penalty $p$ and adds a new state $(i+1,W[1,k-1]\circ
-a,\mathcal{C}',p')$ if $a$ is the read base or $W\circ a$ is a trusted $k$-mer
-($\circ$ is the string concatenation operator). We find the optimal solution
-when we come to the end of the read (line~1). This algorithm may change a base
-on a trusted $k$-mer if doing this leads to more trusted $k$-mers later.  Some
-algorithms such as BLESS~\citep{Heo:2014aa} and Lighter~\citep{Song:2014aa}
-apparently do not backtrack to change a wrong base assignment at an early
-iteration.
+Algorithm~1 gives the BFC implementation. It defines a \emph{state} of
+correction as a 4-tuple $(i,W,\mathcal{C},p)$, which consists of the position
+$i$ of the last visited base, the preceding \mbox{($k$-1)--mer} $W$ ending at
+$i$, the set $\mathcal{C}$ of previous corrected positions and bases (called a
+\emph{solution}) up to $i$, and the penalty $p$ of solution $\mathcal{C}$.  BFC
+keeps all possible states in a priority queue $\mathcal{Q}$. At each iteration,
+it retrieves the state $(i,W,\mathcal{C},p)$ with the lowest penalty $p$ and
+adds a new state $(i+1,W[1,k-2]\circ a,\mathcal{C}',p')$ if $a$ is the read
+base or $W\circ a$ is a trusted $k$-mer. We find the optimal solution when we
+come to the end of the read. This algorithm may change a base on a trusted
+$k$-mer if doing this leads to more trusted $k$-mers later. Some algorithms
+such as BLESS~\citep{Heo:2014aa} and Lighter~\citep{Song:2014aa} apparently do
+not backtrack to change a wrong base assignment at an early iteration.
 
-Algorithm~1 is exponential in the length of the read in the worst case.  In
-implementation, we skip line~3 if the read base is Q20 and the $k$-mer ending
-at it is trusted, or if five bases or two Q20 bases have been corrected in the
-last 10bp window by default. These heuristics reduce the search space.  If BFC
-still takes too many iterations before finding an optimal solution, we stop the
-search and mark the read not correctable.
+The worse-case time complexity of Algorithm~1 is exponential in the length of
+the read. In implementation, we skip line~1 if the read base is Q20 and the
+$k$-mer ending at it is trusted, or if five bases or two Q20 bases have been
+corrected in the last 10bp window by default. The heuristics reduce the
+search space. If BFC still takes too many iterations before finding an optimal
+solution, we stop the search and mark the read not correctable.
 
 \begin{algorithm}[ht]
 \DontPrintSemicolon
 \footnotesize
-\KwIn{K-mer size $k$, trusted k-mer hash table $\mathcal{H}$ and one string $S$}
+\KwIn{K-mer size $k$, set $\mathcal{H}$ of trusted k-mers, and one string $S$}
 \KwOut{Set of corrected positions and bases changed to}
 \BlankLine
 \textbf{Function} {\sc CorrectErrors}$(k, \mathcal{H}, S)$
 \Begin {
-	$\mathcal{Q}\gets${\sc HeapInit}$()$\;
-	{\sc HeapPush}$(\mathcal{Q}, (k-2, S[0,k-2], \emptyset, 0))$\;
-	\While{$A$ is not empty} {
-		$(i, W, \mathcal{C}, p)\gets${\sc HeapPopBest}$(\mathcal{Q})$\;
+	$\mathcal{Q}\gets${\sc HeapInit}$()$\Comment*[r]{$\mathcal{Q}$ is a priority queue}
+	{\sc HeapPush}$(\mathcal{Q}, (k-2, S[0,k-2], \emptyset, 0))$\Comment*[r]{0-based strings}
+	\While{$\mathcal{Q}$ is not empty} {
+		$(i, W, \mathcal{C}, p)\gets${\sc HeapPopBest}$(\mathcal{Q})$\Comment*[r]{current best state}
 		$i\gets i+1$\;
-		\nl\lIf{$i=|S|$} { {\bf return} $\mathcal{C}$ }
-		\For{$a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}$} {
-			$(p',W')\gets (p,W\circ a)$\;
-			\uIf {$a=S[i]$} {
-				\nl\lIf{$W'\not\in \mathcal{H}$} {$p'\gets p'+1$}
-				{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p'))$\;
-			} \ElseIf{$W'\in \mathcal{H}$}{
-				\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}\cup\{(i,a)\},p'+1))$\;
+		\lIf{$i=|S|$} { {\bf return} $\mathcal{C}$ \Comment*[f]{reaching the end of $S$}}
+		\ForEach (\Comment*[f]{try all possible next base}) {$a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}$} {
+			$W'\gets W\circ a$\Comment*[r]{``$\circ$'' concatenates strings}
+			\uIf (\Comment*[f]{``$a$'' is the read base}) {$a=S[i]$} {
+				\eIf (\Comment*[f]{then no penalty applied}) {$W'\in\mathcal{H}$} {
+					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p))$\;
+				} (\Comment*[f]{then apply penalty}) {
+					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p+1))$\;
+				}
+			} \ElseIf (\Comment*[f]{correction made and $W'$ trusted}) {$W'\in \mathcal{H}$} {
+				\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}\cup\{(i,a)\},p+1))$\;
 			}
 		}
 	}
