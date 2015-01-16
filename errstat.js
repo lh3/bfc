@@ -47,6 +47,7 @@ function read1(f, b, t)
 
 var f1 = arguments.length? new File(arguments[0]) : new File();
 var f2 = arguments.length >= 2? new File(arguments[1]) : null;
+var skip_missing = arguments.length >= 3? true : false;
 var buf = new Bytes();
 var st;
 
@@ -66,6 +67,12 @@ while ((st1 = read1(f1, buf, last1)) != null) {
 		st2 = read1(f2, buf, last2);
 		if (st2 == null) throw Error("the 2nd file has fewer reads");
 		//if (st1.name != st2.name) throw Error("different read names: "+st1.name+ " vs "+st2.name);
+		if (skip_missing && st1.name != st2.name) {
+			do {
+				last2 = st2.next;
+				st2 = read1(f2, buf, last2);
+			} while (st2 != null && st2.name != st1.name);
+		}
 		if (st1.nm != st2.nm || st1.cliplen != st2.cliplen || st1.n_segs != st2.n_segs) {
 			var t;
 			if (st1.nm <= st2.nm && st1.cliplen <= st2.cliplen && st1.n_segs == 1) {
