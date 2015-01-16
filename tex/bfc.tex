@@ -96,15 +96,17 @@ search and mark the read not correctable.
 \begin{table}[ht]
 \processtable{Performance of error correction for 4 million human reads}
 {\footnotesize
-\begin{tabular}{lrccccrc}
+\begin{tabular}{lrrcccrc}
 \toprule
 Prog.     & Time & RAM   & Perfect & Chimeric & Better & Worse & Ambi. \\
 \midrule
 BFC       & 7.4h & 63.5G & {\bf 3.04M} & {\bf 12.5k} & {\bf 820k}   & {\bf 7.1k}  & {\bf 14.3k} \\
 BLESS     & 6.5h & 22.3G & 2.91M   & 13.1k    & 666k   & 15.2k & 14.8k \\
-Fermi2    &17.2h & 64.7G & \\
-Lighter   &{\bf 3.2h}&{\bf 13.4G}&2.98M&13.0k & 743k   & 22.4k & 21.8k \\
-Musket    &\\
+Bloocoo   &5.7h&{\bf 4.0G}& 2.88M  & 14.1k    & 751k   & 25.9k & 20.7k \\
+Fermi2    &17.2h & 64.7G & 3.00M   & 17.7k    & 819k   & 29.1k & 47.6k \\
+Lighter   &{\bf 3.2h}& 13.4G&2.98M & 13.0k    & 743k   & 22.4k & 21.8k \\
+Musket    &21.6h & 77.5G & 2.94M   & 22.5k    & 760k   & 24.6k & 46.0k \\
+SGA       &\\
 \botrule
 \end{tabular}}{Column meaning: the wall-clock \emph{time} when 16 threads
 are specified if possible, the peak \emph{RAM} measured by GNU time, number of
@@ -112,6 +114,8 @@ reads mapped \emph{perfectly} to hs37d5 by BWA-MEM, number of \emph{chimeric}
 reads, number of corrected reads \emph{better} than the original reads, number
 of reads \emph{worse} than the original and number of corrected reads with some
 aspects better but some worse than the original reads (column \emph{Ambi}).}
+% Fiona, Trowel and AllPaths-LG used >11GB RAM and got manually killed
+% RACER uses more RAM than input read bases (Molnar and Ilie, 2014). It is not tested.
 
 \end{table}
 
