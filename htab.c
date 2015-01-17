@@ -155,6 +155,10 @@ bfc_ch_t *bfc_ch_restore(const char *fn)
 		for (j = 0; j < t[1]; ++j) {
 			uint64_t key;
 			fread(&key, 8, 1, fp);
+//			if ((key&0xff) > 2. * (key>>8&0x3f) && (key>>8&0x3f) <= 5)
+//				key &= ~(0x3fULL<<8);
+//			if ((key&0xff) > 15 && (key>>8&0x3f) == 0)
+//				key &= ~0x3fffULL;
 			kh_put(cnt, h, key, &absent);
 			assert(absent);
 		}
