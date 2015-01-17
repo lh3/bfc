@@ -76,15 +76,15 @@ solution, we stop the search and mark the read not correctable.
 		$(i, W, \mathcal{C}, p)\gets${\sc HeapPopBest}$(\mathcal{Q})$\Comment*[r]{current best state}
 		$i\gets i+1$\;
 		\lIf{$i=|S|$} { {\bf return} $\mathcal{C}$ \Comment*[f]{reaching the end of $S$}}
-		\ForEach (\Comment*[f]{try all possible next base}) {$a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}$} {
+		\ForEach (\Comment*[f]{try all possible next bases}) {$a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}$} {
 			$W'\gets W\circ a$\Comment*[r]{``$\circ$'' concatenates strings}
 			\uIf (\Comment*[f]{``$a$'' is the read base}) {$a=S[i]$} {
-				\eIf (\Comment*[f]{then no penalty applied}) {$W'\in\mathcal{H}$} {
+				\eIf (\Comment*[f]{good read base; no penalty}) {$W'\in\mathcal{H}$} {
 					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p))$\;
-				} (\Comment*[f]{then apply penalty}) {
+				} (\Comment*[f]{bad read base; penalize}) {
 					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p+1))$\;
 				}
-			} \ElseIf (\Comment*[f]{correction made and $W'$ trusted}) {$W'\in \mathcal{H}$} {
+			} \ElseIf (\Comment*[f]{make a correction with penalty}) {$W'\in \mathcal{H}$} {
 				\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}\cup\{(i,a)\},p+1))$\;
 			}
 		}
