@@ -26,6 +26,10 @@ to use one set of reads to correct another set:
 ```sh
 bfc -s 3g -t16 readset1.fq.gz readset2.fq.gz | gzip -1 > corrected_readset2.fq.gz
 ```
+and to process data from Unix pipes ("<(command)" is bash specific):
+```sh
+bash -c "bfc -s 3g -t16 <(bzip2 -dc reads.fq.bz2) <(bzip2 -dc reads.fq.bz2) | gzip -1 > out.fq.gz"
+```
 BFC also offers an option to trim reads containing singleton k-mers (don't switch
 `-s` and `-k` as some options are ordered):
 ```sh
