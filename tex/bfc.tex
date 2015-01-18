@@ -37,13 +37,13 @@
 
 \begin{methods}
 \section{Methods}
-The BFC error correction algorithm is a $k$-mer spectrum
-algorithm~\citep{Pevzner:2001vn}, which takes a list of trusted $k$-mers and
+The BFC error correction algorithm is based on the $k$-mer
+spectrum~\citep{Pevzner:2001vn}. It takes a list of trusted $k$-mers and
 attempts to find a corrected sequence such that each $k$-mer on the corrected
 sequence is trusted. There are multiple ways to implement this basic idea.
 Algorithm~1 gives the BFC implementation. It defines a \emph{state} of
 correction as a 4-tuple $(i,W,\mathcal{C},p)$, which consists of the position
-$i$ of the last visited base, the preceding \mbox{($k$-1)--mer} $W$ ending at
+$i$ of the preceding base, the last \mbox{($k$-1)--mer} $W$ ending at
 $i$, the set $\mathcal{C}$ of previous corrected positions and bases (called a
 \emph{solution}) up to $i$, and the penalty $p$ of solution $\mathcal{C}$.  BFC
 keeps all possible states in a priority queue $\mathcal{Q}$. At each iteration,
@@ -96,27 +96,41 @@ solution, we stop the search and mark the read not correctable.
 \end{methods}
 
 \section{Results and Discussions}
+
+We evaluated BFC along with BLESS~\citep{Heo:2014aa},
+Bloocoo~\citep{Drezen:2014aa}, fermi2~\citep{Li:2012fk},
+Lighter~\citep{Song:2014aa}, Musket~\citep{Liu:2013ac} and
+SGA~\citep{Simpson:2012aa} on real data (Table~1).
+
 \begin{table}[ht]
-\processtable{Performance of error correction for 4 million human reads}
+\processtable{Performance of error correction}
 {\footnotesize
-\begin{tabular}{lrrccrrc}
+\begin{tabular}{lcrrccrr}
 \toprule
-Prog.     & Time & RAM   & Perfect & Chimeric & Better & Worse & Ambi. \\
+Prog.     & K-mer & Time & RAM   & Perfect & Chimeric & Better & Worse \\
 \midrule
-BFC       & 7.4h & 63.5G & {\bf 3.04M} & 12.5k&{\bf 820k}&{\bf 7.1k}&14.3k \\
-BLESS     & 6.5h & 22.3G & 2.91M   & 13.1k    & 666k   & 15.2k & 14.8k \\
-Bloocoo   &5.7h&{\bf 4.0G}& 2.88M  & 14.1k    & 751k   & 25.9k & 20.7k \\
-Fermi2    &17.2h & 64.7G & 3.00M   & 17.7k    & 819k   & 29.1k & 47.6k \\
-Lighter   &{\bf 3.2h}& 13.4G&2.98M & 13.0k    & 743k   & 22.4k & 21.8k \\
-Musket    &21.6h & 77.5G & 2.94M   & 22.5k    & 760k   & 24.6k & 46.0k \\
-SGA       &48.7h & 35.6G & 3.01M  &{\bf 12.1k}& 750k   & 10.0k & {\bf 10.1k} \\
+BFC       & 37    & 7.4h & 63.5G &{\bf 3.04M}& 12.5k  & 830k   &{\bf 9.7k} \\
+BLESS     & 31    & 6.5h & 22.3G & 2.91M   & 13.1k    & 674k   & 20.8k  \\
+Bloocoo   & 31    &5.7h&{\bf 4.0G}& 2.88M  & 14.1k    & 764k   & 31.5k  \\
+Fermi2    & 29    &17.2h & 64.7G & 3.00M   & 17.7k    &{\bf 849k}&42.8k \\
+Lighter   & 31    &{\bf 3.2h}& 13.4G&2.98M & 13.0k    & 756k   & 30.1k  \\
+Musket    & 27    &21.6h & 77.5G & 2.94M   & 22.5k    & 790k   & 36.3k  \\
+SGA       & 55    &48.7h & 35.6G & 3.01M  &{\bf 12.1k}& 755k   & 12.8k  \\
 \botrule
-\end{tabular}}{Column meaning: the wall-clock \emph{time} when 16 threads
+\end{tabular}}{4.45 million pairs of $\sim$150bp reads were
+downloaded from BaseSpace, under the sample ``NA12878-L7'' of project
+``HiSeq X Ten: TruSeq Nano (4 replicates of NA12878)''. Reads were corrected
+together. 55-mer for SGA was used according to its paper. The maximal k-mer
+length was used for other tools except BLESS. On a subset of two million
+randomly sampled read pairs, the original and the corrected sequences were
+mapped to hs37d5 (http://bit.ly/GRCh37d5) with BWA-MEM~\citep{Li:2013aa}. A
+read is said to become \emph{better} (or \emph{worse}) if the best alignment of
+the corrected sequence has more (or fewer) identical bases than the best of the
+original sequence. The table gives the wall-clock \emph{time} when 16 threads
 are specified if possible, the peak \emph{RAM} measured by GNU time, number of
-reads mapped \emph{perfectly} to hs37d5 by BWA-MEM, number of \emph{chimeric}
-reads, number of corrected reads \emph{better} than the original reads, number
-of reads \emph{worse} than the original and number of corrected reads with some
-aspects better but some worse than the original reads (column \emph{Ambi}).}
+corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads,
+number of corrected reads becoming \emph{better} and the number of reads
+becoming \emph{worse} than the original.}
 % Fiona, Trowel and AllPaths-LG used >11GB RAM and got manually killed
 % RACER uses more RAM than input read bases (Molnar and Ilie, 2014). It is not tested.
 
