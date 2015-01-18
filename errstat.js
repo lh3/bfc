@@ -27,12 +27,16 @@ function read1(f, b, t)
 		lines.push(t);
 	}
 
-	var st = { name:name, next:t, n_segs:0, nm:0, cliplen:0 };
+	var st = { name:name, next:t, n_segs:0, nm:0, cliplen:0, match:0 };
 	t = lines[0];
+	var n_indels = 0, n_matches = 0;
 	if ((t[1]&4) == 0) {
-		while ((m = re.exec(t[5])) != null)
-			if (m[2] == 'S' || m[2] == 'H')
-				st.cliplen += parseInt(m[1]);
+		while ((m = re.exec(t[5])) != null) {
+			var len = parseInt(m[1]);
+			if (m[2] == 'S' || m[2] == 'H') st.cliplen += len;
+			else if (m[2] == 'I' || m[2] == 'D') n_indels += len;
+			else if (m[2] == 'M') n_matches += len;
+		}
 	}
 	for (var i = 0; i < lines.length; ++i) {
 		t = lines[i];
@@ -41,6 +45,7 @@ function read1(f, b, t)
 			if (t[j].substr(0, 5) == "NM:i:")
 				st.nm += parseInt(t[j].substr(5));
 		++st.n_segs;
+		if (i == 0) st.match = n_matches - (st.nm - n_indels);
 	}
 	return st;
 }
@@ -52,7 +57,7 @@ var buf = new Bytes();
 var st;
 
 var n_err_bases = 0, n_err_reads = 0, tot_reads = 0, n_chimeric = 0, n_chimeric_reads = 0, n_unmapped = 0, n_perfect = 0, n_clipped = 0, tot_clip = 0;
-var n1 = 0, n2 = 0, na = 0;
+var n1 = 0, n2 = 0;
 var st1, st2, last1 = null, last2 = null;
 
 while ((st1 = read1(f1, buf, last1)) != null) {
@@ -73,14 +78,11 @@ while ((st1 = read1(f1, buf, last1)) != null) {
 				st2 = read1(f2, buf, last2);
 			} while (st2 != null && st2.name != st1.name);
 		}
-		if (st1.nm != st2.nm || st1.cliplen != st2.cliplen || st1.n_segs != st2.n_segs) {
+		if (st1.match != st2.match) {
 			var t;
-			if (st1.nm <= st2.nm && st1.cliplen <= st2.cliplen && st1.n_segs == 1) {
-				t = "1", ++n1;
-			} else if (st2.nm <= st1.nm && st2.cliplen <= st1.cliplen && st2.n_segs == 1) {
-				t = "2", ++n2;
-			} else t = "a", ++na;
-			print(t, st1.name, st1.n_segs, st1.cliplen, st1.nm, st2.n_segs, st2.cliplen, st2.nm);
+			if (st1.match > st2.match) t = "1", ++n1;
+			else t = "2", ++n2;
+			print(t, st1.name, st1.match, st1.n_segs, st1.cliplen, st1.nm, st2.match, st2.n_segs, st2.cliplen, st2.nm);
 		}
 		last2 = st2.next;
 	}
@@ -99,7 +101,6 @@ print("# clipped bases:     " + tot_clip);
 if (f2) {
 	print("# better reads:      " + n1);
 	print("# worse reads:       " + n2);
-	print("# ambiguous reads:   " + na);
 }
 
 buf.destroy();
