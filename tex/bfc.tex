@@ -133,13 +133,14 @@ not tested.
 \begin{table}[ht]
 \processtable{Performance of error correction}
 {\footnotesize
-\begin{tabular}{lcrrccrr}
+\begin{tabular}{lcrrcccr}
 \toprule
 Prog.     & $k$ & Time & RAM   & Perfect & Chimeric & Better & Worse \\
 \midrule
-BFC       & 37    & 7.4h & 63.5G &{\bf 3.04M}& 12.5k  & 830k   &{\bf 9.7k} \\
-BLESS     & 31    & 6.5h & 22.3G & 2.91M   & 13.1k    & 674k   & 20.8k  \\
-BLESS     & 55    & 5.2h & 22.3G & 3.01M  &{\bf 11.5k}& 775k   & 10.3k  \\
+BFC       & 37    & 7.4h & 63.5G &{\bf 3.04M}& 12.5k  & 830k   & 9.7k \\
+BLESS     & 31    & 6.5h & 22.3G & 2.91M   & 13.1k    & 674k   & 20.8k \\
+BLESS     & 55    & 5.2h & 22.3G & 3.01M   & 11.5k    & 775k   & 10.3k \\
+BLESS     & 63    & 5.2h & 22.3G & 3.01M  &{\bf 11.4k}& 767k   &{\bf 7.4k} \\
 Bloocoo   & 31    &5.7h&{\bf 4.0G}& 2.88M  & 14.1k    & 764k   & 31.5k  \\
 Fermi2    & 29    &17.2h & 64.7G & 3.00M   & 17.7k    &{\bf 849k}&42.8k \\
 Lighter   & 31    &{\bf 3.2h}& 13.4G&2.98M & 13.0k    & 756k   & 30.1k  \\
