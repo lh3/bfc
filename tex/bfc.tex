@@ -26,7 +26,11 @@
 \maketitle
 
 \begin{abstract}
-\section{Summary:}
+\section{Summary:} We present a new tool to correct sequencing errors in
+Illumina data produced from whole-genome shotgun resequencing. It uses a
+non-greedy algorithm and shows comparable performance, better usability and
+higher accuracy in an evaluation that has the most complete collection of
+high-performance error correctors.
 
 \section{Availability and implementation:} https://github.com/lh3/bfc
 
@@ -35,25 +39,34 @@
 
 \section{Introduction}
 
+\emph{Error correction} is a process to fix sequencing errors on a sequence read
+by using other overlapping reads that do not contain the errors. Many \emph{de
+novo} assemblers, in particular short-read assemblers for large genomes, use
+error correction to reduce the complexity of the assembly graph such that the
+graph can be fitted to limited RAM. The most popular class of the error
+correction algorithms is based on the $k$-mer spectrum~\citep{Pevzner:2001vn}.
+It takes a list of trusted $k$-mers and attempts to find a sequence with
+minimal corrections such that each $k$-mer on the corrected sequence is
+trusted. Most fast implementations take a greedy approach. They make a
+correction based on the local sequence context and do not revert the decision.
+They may not find the sequence with the minimal corrections. We worried that
+the greedy strategy might affect the accuracy given reads from a repeat-rich
+diploid genome, so derived a new algorithm. It is optimal provided that we know
+there is an error-free $k$-mer in the read.
+
 \begin{methods}
 \section{Methods}
-The BFC error correction algorithm is based on the $k$-mer
-spectrum~\citep{Pevzner:2001vn}. It takes a list of trusted $k$-mers and
-attempts to find a corrected sequence such that each $k$-mer on the corrected
-sequence is trusted. There are multiple ways to implement this basic idea.
-Algorithm~1 gives the BFC implementation. It defines a \emph{state} of
-correction as a 4-tuple $(i,W,\mathcal{C},p)$, which consists of the position
-$i$ of the preceding base, the last \mbox{($k$-1)--mer} $W$ ending at
+Algorithm~1 is the key component of the BFC method. It defines a \emph{state}
+of correction as a 4-tuple $(i,W,\mathcal{C},p)$, which consists of the
+position $i$ of the preceding base, the last \mbox{($k$-1)--mer} $W$ ending at
 $i$, the set $\mathcal{C}$ of previous corrected positions and bases (called a
-\emph{solution}) up to $i$, and the penalty $p$ of solution $\mathcal{C}$.  BFC
+\emph{solution}) up to $i$, and the penalty $p$ of solution $\mathcal{C}$. BFC
 keeps all possible states in a priority queue $\mathcal{Q}$. At each iteration,
 it retrieves the state $(i,W,\mathcal{C},p)$ with the lowest penalty $p$ and
 adds a new state $(i+1,W[1,k-2]\circ a,\mathcal{C}',p')$ if $a$ is the read
-base or $W\circ a$ is a trusted $k$-mer. We find the optimal solution when we
-come to the end of the read. This algorithm may change a base on a trusted
-$k$-mer if doing this leads to more trusted $k$-mers later. Some algorithms
-such as BLESS~\citep{Heo:2014aa} and Lighter~\citep{Song:2014aa} apparently do
-not backtrack to change a wrong base assignment at an early iteration.
+base or $W\circ a$ is a trusted $k$-mer. If the first $k$-mer in $S$ is
+error free and we remove line~1, this algorithm finds the optimal corrected
+sequence.
 
 The worse-case time complexity of Algorithm~1 is exponential in the length of
 the read. In implementation, we skip line~1 if the read base is Q20 and the
@@ -61,6 +74,12 @@ $k$-mer ending at it is trusted, or if five bases or two Q20 bases have been
 corrected in the last 10bp window by default. The heuristics reduce the
 search space. If BFC still takes too many iterations before finding an optimal
 solution, we stop the search and mark the read not correctable.
+
+Given a read, BFC finds the longest substring on which each $k$-mer is trusted. It
+then extends the substring to both ends of the read with Algorithm~1. If a read
+does not contain any trusted $k$-mers, BFC exhaustively tests all $k$-mer
+one hamming distance away from the first $k$-mer on the read to find a trusted
+$k$-mer. It marks the read uncorrectable if this fails.
 
 \begin{algorithm}[ht]
 \DontPrintSemicolon
@@ -100,14 +119,23 @@ solution, we stop the search and mark the read not correctable.
 We evaluated BFC along with BLESS~\citep{Heo:2014aa},
 Bloocoo~\citep{Drezen:2014aa}, fermi2~\citep{Li:2012fk},
 Lighter~\citep{Song:2014aa}, Musket~\citep{Liu:2013ac} and
-SGA~\citep{Simpson:2012aa} on real data (Table~1).
+SGA~\citep{Simpson:2012aa} on real data (Table~1). We ran the tools on a Linux
+server with 20 cores of Intel XXX CPUs with 128GB RAM. The command lines were
+included in the BFC source code package (http://bit.ly/bfc-eval).  We have
+considered AllPaths-LG~\citep{Gnerre:2011ys}, Coral~\citep{Salmela:2011aa},
+Fiona~\citep{Schulz:2014aa}, HiTEC~\citep{Ilie:2011fk},
+RACER~\citep{Ilie:2013aa}, SHREC~\citep{Schroder:2009uq} and
+Trowel~\citep{Lim:2014aa}, but they require more RAM than our machine, so were
+not tested.
+
+
 
 \begin{table}[ht]
 \processtable{Performance of error correction}
 {\footnotesize
 \begin{tabular}{lcrrccrr}
 \toprule
-Prog.     & K-mer & Time & RAM   & Perfect & Chimeric & Better & Worse \\
+Prog.     & $k$ & Time & RAM   & Perfect & Chimeric & Better & Worse \\
 \midrule
 BFC       & 37    & 7.4h & 63.5G &{\bf 3.04M}& 12.5k  & 830k   &{\bf 9.7k} \\
 BLESS     & 31    & 6.5h & 22.3G & 2.91M   & 13.1k    & 674k   & 20.8k  \\
@@ -126,7 +154,7 @@ randomly sampled read pairs, the original and the corrected sequences were
 mapped to hs37d5 (http://bit.ly/GRCh37d5) with BWA-MEM~\citep{Li:2013aa}. A
 read is said to become \emph{better} (or \emph{worse}) if the best alignment of
 the corrected sequence has more (or fewer) identical bases than the best of the
-original sequence. The table gives the wall-clock \emph{time} when 16 threads
+original sequence. The table gives $k$-mer size, the wall-clock \emph{time} when 16 threads
 are specified if possible, the peak \emph{RAM} measured by GNU time, number of
 corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads,
 number of corrected reads becoming \emph{better} and the number of reads
