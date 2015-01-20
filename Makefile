@@ -29,3 +29,9 @@ depend:
 		(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CFLAGS) $(DFLAGS) -- *.c)
 
 # DO NOT DELETE
+
+bbf.o: bbf.h
+bfc.o: bfc.h bbf.h kmer.h bseq.h
+bseq.o: bseq.h kseq.h
+correct.o: bfc.h bbf.h kmer.h bseq.h kvec.h ksort.h
+count.o: bfc.h bbf.h kmer.h bseq.h bkmer.h
