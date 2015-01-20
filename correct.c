@@ -489,6 +489,7 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 			if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
 			printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
 				   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
+			if (is_fq) printf("+\n%s\n", s->qual);
 bfc_ec_cb_free:
 			free(s->seq); free(s->qual); free(s->name);
 		}
