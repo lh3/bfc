@@ -90,7 +90,7 @@ int bfc_bf_is_dump(const char *fn)
 {
 	FILE *fp;
 	char magic[4];
-	if ((fp = fopen(fn, "wb")) == 0) return 0;
+	if ((fp = fopen(fn, "rb")) == 0) return 0;
 	fread(magic, 1, 4, fp);
 	fclose(fp);
 	return (strncmp(magic, BBF_MAGIC, 4) == 0);
