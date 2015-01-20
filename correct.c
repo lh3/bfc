@@ -430,6 +430,31 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	return s;
 }
 
+/******************
+ * K-mer trimming *
+ ******************/
+
+static uint64_t max_streak(int k, const bfc_bf_t *bf, const bseq1_t *s)
+{
+	int i, l;
+	uint64_t max = 0, t = 0;
+	bfc_kmer_t x = bfc_kmer_null;
+	for (i = l = 0; i < s->l_seq; ++i) {
+		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
+		if (c < 4) { // not an ambiguous base
+			bfc_kmer_append(k, x.x, c);
+			if (++l >= k) { // ok, we have a k-mer now
+				uint64_t hash, y[2];
+				hash = bfc_kmer_hash(k, x.x, y);
+				if (bfc_bf_get(bf, hash) == bf->n_hashes) t += 1ULL<<32; // in bloom filter
+				else t = i + 1;
+			} else t = i + 1;
+		} else l = 0, x = bfc_kmer_null, t = i + 1;
+		max = max > t? max : t;
+	}
+	return max;
+}
+
 /********************
  * Error correction *
  ********************/
@@ -437,7 +462,6 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 typedef struct {
 	const bfc_opt_t *opt;
 	bseq_file_t *ks;
-	const bfc_bf_t *bf;
 	bfc_ec1buf_t **e;
 	int64_t n_processed;
 } ec_shared_t;
@@ -453,10 +477,28 @@ static void worker_ec(void *_data, long k, int tid)
 	ec_step_t *data = (ec_step_t*)_data;
 	ec_shared_t *es = data->es;
 	bseq1_t *s = &data->seqs[k];
-	ecstat_t st;
 	if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
-	st = bfc_ec1(es->e[tid], s->seq, s->qual);
-	s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
+	if (es->opt->kmer_trim) {
+		uint64_t max;
+		max = max_streak(es->opt->k, es->e[tid]->bf, s);
+		if (max>>32 && (double)((max>>32) + es->opt->k) / s->l_seq > es->opt->trim_thres) {
+			int start = (uint32_t)max, end = start + (max>>32);
+			start -= es->opt->k - 1;
+			assert(start >= 0 && end <= s->l_seq);
+			if (start > 0) memmove(s->seq, s->seq + start, end - start);
+			s->l_seq = end - start;
+			s->seq[s->l_seq] = 0;
+			if (s->qual) {
+				if (start > 0) memmove(s->qual, s->qual + start, s->l_seq);
+				s->qual[s->l_seq] = 0;
+			}
+			s->aux = 0;
+		} else s->aux = 1;
+	} else {
+		ecstat_t st;
+		st = bfc_ec1(es->e[tid], s->seq, s->qual);
+		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
+	}
 }
 
 void *bfc_ec_cb(void *shared, int step, void *_data)
@@ -482,11 +524,11 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
 			int is_fq = (s->qual && !es->opt->no_qual);
-			if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
-			printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
-				   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
-			if (is_fq) printf("+\n%s\n", s->qual);
-bfc_ec_cb_free:
+			if (!es->opt->discard || !(s->aux&1)) {
+				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
+					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
+				if (is_fq) printf("+\n%s\n", s->qual);
+			}
 			free(s->seq); free(s->qual); free(s->name);
 		}
 		free(data->seqs); free(data);

@@ -25,6 +25,9 @@ typedef struct {
 	int q;
 	int win_multi_ec;
 
+	int kmer_trim;
+	float trim_thres;
+
 	// these ec options cannot be changed on the command line
 	int max_end_ext;
 	int w_ec, w_ec_high, w_absent;

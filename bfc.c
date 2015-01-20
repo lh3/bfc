@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r151"
+#define BFC_VERSION "r152"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -24,6 +24,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 
 	opt->min_cov = 4;
 	opt->win_multi_ec = 10;
+	opt->trim_thres = 0.9f;
 
 	opt->max_end_ext = 5;
 	opt->w_ec = 1;
@@ -41,6 +42,7 @@ static void usage(FILE *fp, bfc_opt_t *o)
 	fprintf(fp, "  -H INT       use INT hash functions for Bloom filter [%d]\n", o->n_hashes);
 	fprintf(fp, "  -c INT       min k-mer coverage [%d]\n", o->min_cov);
 	fprintf(fp, "  -w INT       no more than %d ec or %d highQ ec in INT-bp window [%d]\n", BFC_EC_HIST, BFC_EC_HIST_HIGH, o->win_multi_ec);
+	fprintf(fp, "  -T           trim/drop uncorrectable regions/reads\n");
 //	fprintf(fp, "  -D           discard uncorrectable reads\n");
 	fprintf(fp, "  -Q           force FASTA output\n");
 	fprintf(fp, "  -v           show version number\n");
@@ -55,7 +57,7 @@ int main(int argc, char *argv[])
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
-	while ((c = getopt(argc, argv, "hvV:k:L:t:H:q:Jc:w:DQ")) >= 0) {
+	while ((c = getopt(argc, argv, "1ThvV:k:L:t:H:q:Jc:w:DQ")) >= 0) {
 		if (c == 'q') opt.q = atoi(optarg);
 		else if (c == 't') opt.n_threads = atoi(optarg);
 		else if (c == 'H') opt.n_hashes = atoi(optarg);
@@ -63,6 +65,7 @@ int main(int argc, char *argv[])
 		else if (c == 'w') opt.win_multi_ec = atoi(optarg);
 		else if (c == 'D') opt.discard = 1;
 		else if (c == 'Q') opt.no_qual = 1;
+		else if (c == 'T' || c == '1') opt.kmer_trim = opt.discard = 1;
 		else if (c == 'J') opt.no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'V') bfc_verbose = atoi(optarg);
 		else if (c == 'h') {
