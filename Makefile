@@ -26,7 +26,7 @@ clean:
 		rm -fr gmon.out *.o ext/*.o a.out $(PROG) *~ *.a *.dSYM session*
 
 depend:
-		(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CFLAGS) $(DFLAGS) -- *.c)
+		(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CFLAGS) $(DFLAGS) -- *.c *.cpp)
 
 # DO NOT DELETE
 
@@ -35,3 +35,7 @@ bfc.o: bfc.h bbf.h kmer.h bseq.h
 bseq.o: bseq.h kseq.h
 correct.o: bfc.h bbf.h kmer.h bseq.h kvec.h ksort.h
 count.o: bfc.h bbf.h kmer.h bseq.h bkmer.h
+bkmer.o: bkmer.h kmc_file.h kmer_defs.h kmer_api.h mmer.h
+kmc_file.o: stdafx.h mmer.h kmer_defs.h kmc_file.h kmer_api.h
+kmer_api.o: stdafx.h kmer_api.h kmer_defs.h mmer.h
+mmer.o: stdafx.h mmer.h kmer_defs.h
