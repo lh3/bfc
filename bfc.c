@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r138"
+#define BFC_VERSION "r144"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -35,7 +35,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 
 static void usage(FILE *fp, bfc_opt_t *o)
 {
-	fprintf(fp, "Usage: bfc [options] <kmc.prefix> <in.fq>\n");
+	fprintf(fp, "Usage: bfc [options] <kmc.prefix>|<bf.dump> [in.fq]\n");
 	fprintf(fp, "Options:\n");
 	fprintf(fp, "  -t INT       number of threads [%d]\n", o->n_threads);
 	fprintf(fp, "  -H INT       use INT hash functions for Bloom filter [%d]\n", o->n_hashes);
@@ -87,8 +87,10 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	bf = bfc_count(argv[optind], &opt);
-	bfc_correct(argv[optind+1], &opt, bf);
+	if (bfc_bf_is_dump(argv[optind])) bf = bfc_bf_restore(argv[optind]);
+	else bf = bfc_count(argv[optind], &opt);
+	if (optind + 1 < argc) bfc_correct(argv[optind+1], &opt, bf);
+	else bfc_bf_dump(0, bf);
 	bfc_bf_destroy(bf);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, BFC_VERSION);

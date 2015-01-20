@@ -17,4 +17,8 @@ void bfc_bf_destroy(bfc_bf_t *b);
 int bfc_bf_insert(bfc_bf_t *b, uint64_t hash);
 int bfc_bf_get(const bfc_bf_t *b, uint64_t hash);
 
+void bfc_bf_dump(const char *fn, const bfc_bf_t *bf);
+int bfc_bf_is_dump(const char *fn);
+bfc_bf_t *bfc_bf_restore(const char *fn);
+
 #endif

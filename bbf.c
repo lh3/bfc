@@ -1,6 +1,10 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include "bbf.h"
+
+#define BBF_MAGIC "BBF\1"
+#define BBF_READ_SIZE 0x1000000
 
 bfc_bf_t *bfc_bf_init(int n_shift, int n_hashes)
 {
@@ -60,4 +64,62 @@ int bfc_bf_get(const bfc_bf_t *b, uint64_t hash)
 		++i;
 	}
 	return cnt;
+}
+
+void bfc_bf_dump(const char *fn, const bfc_bf_t *bf)
+{
+	FILE *fp;
+	uint32_t x[2];
+	uint64_t rest;
+	uint8_t *p;
+	fp = fn && strcmp(fn, "-")? fopen(fn, "wb") : stdout;
+	if (fp == 0) return;
+	x[0] = bf->n_shift, x[1] = bf->n_hashes;
+	fwrite(BBF_MAGIC, 1, 4, fp);
+	fwrite(x, 4, 2, fp);
+	rest = 1ULL<<(bf->n_shift-3), p = bf->b;
+	while (rest) {
+		size_t ret;
+		ret = fwrite(p, 1, BBF_READ_SIZE, fp);
+		p += ret; rest -= ret;
+	}
+	fclose(fp);
+}
+
+int bfc_bf_is_dump(const char *fn)
+{
+	FILE *fp;
+	char magic[4];
+	if ((fp = fopen(fn, "rb")) == 0) return 0;
+	fread(magic, 1, 4, fp);
+	fclose(fp);
+	return (strncmp(magic, BBF_MAGIC, 4) == 0);
+}
+
+bfc_bf_t *bfc_bf_restore(const char *fn)
+{
+	FILE *fp;
+	uint32_t x[2];
+	char magic[4];
+	uint64_t rest;
+	bfc_bf_t *bf;
+	uint8_t *p;
+
+	fp = fn && strcmp(fn, "-")? fopen(fn, "rb") : stdin;
+	if (fp == 0) return 0;
+	fread(magic, 1, 4, fp);
+	if (strncmp(magic, BBF_MAGIC, 4)) {
+		fclose(fp);
+		return 0;
+	}
+	fread(x, 4, 2, fp);
+	bf = bfc_bf_init(x[0], x[1]);
+	rest = 1ULL<<(bf->n_shift-3), p = bf->b;
+	while (rest) {
+		size_t ret;
+		ret = fread(p, 1, BBF_READ_SIZE, fp);
+		p += ret; rest -= ret;
+	}
+	fclose(fp);
+	return bf;
 }
