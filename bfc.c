@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r148"
+#define BFC_VERSION "r150"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -22,7 +22,7 @@ void bfc_opt_init(bfc_opt_t *opt)
 	opt->q = 20;
 	opt->n_hashes = 4;
 
-	opt->min_cov = 3;
+	opt->min_cov = 4;
 	opt->win_multi_ec = 10;
 
 	opt->max_end_ext = 5;
