@@ -5,6 +5,13 @@
 #include <stdio.h>
 #include "bfc.h"
 
+static inline int bfc_trusted(const bfc_bf_t *bf, int k, const bfc_kmer_t *x)
+{
+	uint64_t hash, y[2];
+	hash = bfc_kmer_hash(k, x->x, y);
+	return (bfc_bf_get(bf, hash) == bf->n_hashes);
+}
+
 /**************************
  * Sequence struct for ec *
  **************************/
@@ -14,7 +21,8 @@
 typedef struct { // NOTE: unaligned memory
 	uint8_t b:3, ob:3, q:1, oq:1;
 	uint8_t ec:1, absent:1, dummy6:6;
-	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, conflict:1, dummy:1;
+	uint8_t cov:6, solid_end:1, conflict:1;
+	uint8_t dummy;
 	int i;
 } ecbase_t;
 
@@ -60,23 +68,21 @@ static void bfc_seq_revcomp(ecseq_t *seq)
  * Independent ec routines *
  ***************************/
 
-int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch, bfc_kc_t *kc)
+int bfc_ec_greedy_k(int k, const bfc_kmer_t *x, const bfc_bf_t *bf)
 {
-	int i, j, max = 0, max_ec = -1, max2 = 0;
+	int i, j, n_trusted = 0, ret = -1;
 	for (i = 0; i < k; ++i) {
 		int c = (x->x[1]>>i&1)<<1 | (x->x[0]>>i&1);
 		for (j = 0; j < 4; ++j) {
 			bfc_kmer_t y = *x;
-			int ret;
 			if (j == c) continue;
 			bfc_kmer_change(k, y.x, i, j);
-			ret = bfc_kc_get(ch, kc, &y);
-			if (ret < 0) continue;
-			if ((max&0xff) < (ret&0xff)) max2 = max, max = ret, max_ec = i<<2 | j;
-			else if ((max2&0xff) < (ret&0xff)) max2 = ret;
+			if (!bfc_trusted(bf, k, &y)) continue;
+			ret = i<<2 | j;
+			if (++n_trusted > 1) return -1;
 		}
 	}
-	return (max&0xff) * 3 > mode && (max2&0xff) < 3? max_ec : -1;
+	return ret;
 }
 
 int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
@@ -93,23 +99,19 @@ int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
 	return i;
 }
 
-void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, bfc_kc_t *kc)
+void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_bf_t *bf)
 {
-	int i, l, r, j;
+	int i, l, j;
 	bfc_kmer_t x = bfc_kmer_null;
 	for (i = l = 0; i < s->n; ++i) {
 		ecbase_t *c = &s->a[i];
-		c->high_end = c->solid_end = c->lcov = c->hcov = 0;
+		c->solid_end = c->cov = 0;
 		if (c->b < 4) {
 			bfc_kmer_append(k, x.x, c->b);
 			if (++l >= k) {
-				if ((r = bfc_kc_get(ch, kc, &x)) >= 0) {
-					if ((r>>8&0x3f) >= min_occ+1) c->high_end = 1;
-					if ((r&0xff) >= min_occ) {
-						c->solid_end = 1;
-						for (j = i - k + 1; j <= i; ++j)
-							++s->a[j].lcov, s->a[j].hcov += c->high_end;
-					}
+				if (bfc_trusted(bf, k, &x)) {
+					c->solid_end = 1;
+					for (j = i - k + 1; j <= i; ++j) ++s->a[j].cov;
 				}
 			}
 		} else l = 0, x = bfc_kmer_null;
@@ -136,7 +138,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 #include "ksort.h"
 
 typedef struct {
-	uint8_t ec:1, ec_high:1, absent:1, absent_high:1, b:4;
+	uint8_t ec:1, ec_high:1, absent:1, dummy:1, b:4;
 } bfc_penalty_t;
 
 typedef struct {
@@ -160,34 +162,30 @@ typedef struct {
 
 typedef struct {
 	const bfc_opt_t *opt;
-	const bfc_ch_t *ch;
-	bfc_kc_t *kc;
+	const bfc_bf_t *bf;
 	kvec_t(echeap1_t) heap;
 	kvec_t(ecstack1_t) stack;
 	ecseq_t seq, tmp, ec[2];
-	int mode;
 } bfc_ec1buf_t;
 
 #define heap_lt(a, b) ((a).tot_pen > (b).tot_pen)
 KSORT_INIT(ec, echeap1_t, heap_lt)
 
-static bfc_ec1buf_t *ec1buf_init(const bfc_opt_t *opt, const bfc_ch_t *ch)
+static bfc_ec1buf_t *ec1buf_init(const bfc_opt_t *opt, const bfc_bf_t *bf)
 {
 	bfc_ec1buf_t *e;
 	e = calloc(1, sizeof(bfc_ec1buf_t));
-	e->opt = opt, e->ch = ch;
-	e->kc = bfc_kc_init();
+	e->opt = opt, e->bf = bf;
 	return e;
 }
 
 static void ec1buf_destroy(bfc_ec1buf_t *e)
 {	
-	bfc_kc_destroy(e->kc);
 	free(e->heap.a); free(e->stack.a); free(e->seq.a); free(e->tmp.a); free(e->ec[0].a); free(e->ec[1].a);
 	free(e);
 }
 
-#define weighted_penalty(o, p) ((o)->w_ec * (p).ec + (o)->w_ec_high * (p).ec_high + (o)->w_absent * (p).absent + (o)->w_absent_high * (p).absent_high)
+#define weighted_penalty(o, p) ((o)->w_ec * (p).ec + (o)->w_ec_high * (p).ec_high + (o)->w_absent * (p).absent)
 
 static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen)
 {
@@ -284,15 +282,11 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (c && c->b < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
-				os = bfc_kc_get(e->ch, e->kc, &x);
+				os = bfc_trusted(e->bf, e->opt->k, &x);
 				++(*n_lookups);
-				if (c->q && (os&0xff) >= e->opt->min_cov + 1 && c->lcov >= e->opt->min_cov + 1) fixed = 1;
-				else if (c->hcov > e->opt->k * .75) fixed = 1;
-				if (bfc_verbose >= 4) {
-					fprintf(stderr, "     Original base:%c qual:%d fixed:%d count:", "ACGTN"[c->b], c->q, fixed);
-					if (os >= 0) fprintf(stderr, "%d,%d\n", os&0xff, os>>8&0x3f);
-					else fprintf(stderr, "-1,-1\n");
-				}
+				if (c->q && os && c->cov >= e->opt->min_cov + 1) fixed = 1;
+				if (bfc_verbose >= 4)
+					fprintf(stderr, "     Original base:%c qual:%d fixed:%d trusted:%d", "ACGTN"[c->b], c->q, fixed, os);
 			}
 			// extension
 			for (b = 0; b < 4; ++b) {
@@ -306,23 +300,20 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 						if (z.ecpos[BFC_EC_HIST-1] >= 0 && z.i - z.ecpos[BFC_EC_HIST-1] < e->opt->win_multi_ec) continue; // no clustered corrections
 					}
 					bfc_kmer_append(e->opt->k, x.x, b);
-					s = bfc_kc_get(e->ch, e->kc, &x);
+					s = bfc_trusted(e->bf, e->opt->k, &x);
 					++(*n_lookups);
-					if (bfc_verbose >= 4 && s >= 0)
-						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d\n", "ACGTN"[b], s&0xff, s>>8&0x3f);
-					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
-					//if (os >= 0 && (s&0xff) - (os&0xff) < 2) continue; // not sufficiently better than the read path
+					if (bfc_verbose >= 4 && s)
+						fprintf(stderr, "     Alternative k-mer: (%c,%d)\n", "ACGTN"[b], s);
+					if (s == 0) continue; // not solid
 					pen.ec = c && c->b < 4? 1 : 0;
 					pen.ec_high = pen.ec? c->oq : 0;
 					pen.absent = 0;
-					pen.absent_high = ((s>>8&0xff) < e->opt->min_cov);
 					pen.b = b;
 					added[n_added++] = pen;
 					++other_ext;
 				} else {
 					pen.ec = pen.ec_high = 0;
-					pen.absent = (os < 0 || (os&0xff) < e->opt->min_cov);
-					pen.absent_high = (os < 0 || (os>>8&0xff) < e->opt->min_cov);
+					pen.absent = (os == 0);
 					pen.b = b;
 					added[n_added++] = pen;
 				}
@@ -382,19 +373,18 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	uint64_t r, n_lookups = 0;
 	ecstat_t s;
 
-	bfc_kc_clear(e->kc);
 	s.failed = 1, s.n_ec = 0, s.n_ec_high = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	for (i = 0; i < e->seq.n; ++i)
 		if (e->seq.a[i].ob > 3) ++n_n;
 	if (n_n > e->seq.n * .05) return s;
-	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->bf);
 	r = bfc_ec_best_island(e->opt->k, &e->seq);
 	if (r == 0) { // no solid k-mer
 		bfc_kmer_t x;
 		int ec = -1;
 		while ((end = bfc_ec_first_kmer(e->opt->k, &e->seq, start, &x)) < e->seq.n) {
-			ec = bfc_ec_greedy_k(e->opt->k, e->mode, &x, e->ch, e->kc);
+			ec = bfc_ec_greedy_k(e->opt->k, &x, e->bf);
 			if (ec >= 0) break;
 			if (end + (e->opt->k>>1) >= e->seq.n) break;
 			start = end - (e->opt->k>>1);
@@ -430,43 +420,18 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		if (qual) qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
 	}
 	if (bfc_verbose >= 4) {
-		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->bf);
 		fprintf(stderr, "* failed:%d n_ec:%d n_ec_high:%d\n  ", s.failed, s.n_ec, s.n_ec_high);
 		for (i = 0; i < e->seq.n; ++i)
 			fputc((e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b], stderr);
 		fprintf(stderr, "\n  ");
 		for (i = 0; i < e->seq.n; ++i)
-			fputc('0' + (int)(10. * e->seq.a[i].lcov / e->opt->k + .499), stderr);
+			fputc('0' + (int)(10. * e->seq.a[i].cov / e->opt->k + .499), stderr);
 		fputc('\n', stderr);
 	}
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* number of hash table lookups: %ld\n", (long)n_lookups);
 	return s;
-}
-
-/******************
- * K-mer trimming *
- ******************/
-
-static uint64_t max_streak(int k, const bfc_bf_t *bf, const bseq1_t *s)
-{
-	int i, l;
-	uint64_t max = 0, t = 0;
-	bfc_kmer_t x = bfc_kmer_null;
-	for (i = l = 0; i < s->l_seq; ++i) {
-		int c = seq_nt6_table[(uint8_t)s->seq[i]] - 1;
-		if (c < 4) { // not an ambiguous base
-			bfc_kmer_append(k, x.x, c);
-			if (++l >= k) { // ok, we have a k-mer now
-				uint64_t hash, y[2];
-				hash = bfc_kmer_hash(k, x.x, y);
-				if (bfc_bf_get(bf, hash) == bf->n_hashes) t += 1ULL<<32; // in bloom filter
-				else t = i + 1;
-			} else t = i + 1;
-		} else l = 0, x = bfc_kmer_null, t = i + 1;
-		max = max > t? max : t;
-	}
-	return max;
 }
 
 /********************
@@ -492,28 +457,10 @@ static void worker_ec(void *_data, long k, int tid)
 	ec_step_t *data = (ec_step_t*)_data;
 	ec_shared_t *es = data->es;
 	bseq1_t *s = &data->seqs[k];
-	if (!es->opt->filter_mode) {
-		ecstat_t st;
-		if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
-		st = bfc_ec1(es->e[tid], s->seq, s->qual);
-		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
-	} else {
-		uint64_t max;
-		max = max_streak(es->opt->k, es->bf, s);
-		if (max>>32 && (double)((max>>32) + es->opt->k) / s->l_seq > es->opt->min_frac) {
-			int start = (uint32_t)max, end = start + (max>>32);
-			start -= es->opt->k - 1;
-			assert(start >= 0 && end <= s->l_seq);
-			memmove(s->seq, s->seq + start, end - start);
-			s->l_seq = end - start;
-			s->seq[s->l_seq] = 0;
-			if (s->qual) {
-				memmove(s->qual, s->qual + start, s->l_seq);
-				s->qual[s->l_seq] = 0;
-			}
-			s->aux = 0;
-		} else s->aux = 1;
-	}
+	ecstat_t st;
+	if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
+	st = bfc_ec1(es->e[tid], s->seq, s->qual);
+	s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
 }
 
 void *bfc_ec_cb(void *shared, int step, void *_data)
@@ -539,15 +486,9 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
 			int is_fq = (s->qual && !es->opt->no_qual);
-			if (!es->opt->filter_mode) {
-				if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
-				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
-					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
-			} else {
-				if (s->aux) goto bfc_ec_cb_free;
-				printf("%c%s\n%s\n", is_fq? '@' : '>', s->name, s->seq);
-			}
-			if (is_fq) printf("+\n%s\n", s->qual);
+			if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
+			printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
+				   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
 bfc_ec_cb_free:
 			free(s->seq); free(s->qual); free(s->name);
 		}
@@ -556,39 +497,23 @@ bfc_ec_cb_free:
 	return 0;
 }
 
-void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
+void bfc_correct(const char *fn, const bfc_opt_t *opt, const bfc_bf_t *bf)
 {
 	ec_shared_t es;
+	int i;
+
 	memset(&es, 0, sizeof(ec_shared_t));
 	es.opt = opt;
 	if (bfc_verbose >= 3)
 		fprintf(stderr, "[M::%s @%.1f*%.1f%%] Starting...\n", __func__, realtime()-bfc_real_time,
 				100.*cputime()/(realtime()-bfc_real_time+1e-6));
-	if (!opt->filter_mode) {
-		int i, mode;
-		const bfc_ch_t *ch = (const bfc_ch_t*)ptr;
-		uint64_t hist[256], hist_high[64];
-
-		mode = bfc_ch_hist(ch, hist, hist_high);
-		if (bfc_verbose >= 4) {
-			for (i = 0; i < 256; ++i)
-				if (i < 64) fprintf(stderr, "[M::%s] %3d : %llu : %llu\n", __func__, i, (long long)hist[i], (long long)hist_high[i]);
-				else fprintf(stderr, "[M::%s] %3d : %llu\n", __func__, i, (long long)hist[i]);
-		}
-
-		es.e = calloc(opt->n_threads, sizeof(void*));
-		for (i = 0; i < opt->n_threads; ++i)
-			es.e[i] = ec1buf_init(opt, ch), es.e[i]->mode = mode;
-		es.ks = bseq_open(fn);
-		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &es, 3);
-		bseq_close(es.ks);
-		for (i = 0; i < opt->n_threads; ++i)
-			ec1buf_destroy(es.e[i]);
-		free(es.e);
-	} else {
-		es.bf = (const bfc_bf_t*)ptr;
-		es.ks = bseq_open(fn);
-		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &es, 3);
-		bseq_close(es.ks);
-	}
+	es.e = calloc(opt->n_threads, sizeof(void*));
+	for (i = 0; i < opt->n_threads; ++i)
+		es.e[i] = ec1buf_init(opt, bf);
+	es.ks = bseq_open(fn);
+	kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &es, 3);
+	bseq_close(es.ks);
+	for (i = 0; i < opt->n_threads; ++i)
+		ec1buf_destroy(es.e[i]);
+	free(es.e);
 }

@@ -3,8 +3,9 @@
 
 #include <stdint.h>
 
-#define BFC_BLK_SHIFT  9 // 64 bytes, the size of a cache line
-#define BFC_BLK_MASK   ((1<<(BFC_BLK_SHIFT)) - 1)
+#define BFC_MAX_BF_SHIFT 37
+#define BFC_BLK_SHIFT    9 // 64 bytes, the size of a cache line
+#define BFC_BLK_MASK     ((1<<(BFC_BLK_SHIFT)) - 1)
 
 typedef struct {
 	int n_shift, n_hashes;
