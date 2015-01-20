@@ -4,8 +4,8 @@
 
   Authors: Sebastian Deorowicz and Agnieszka Debudaj-Grabysz
 
-  Version: 2.1
-  Date   : 2014-12-18
+  Version: 2.0
+  Date   : 2014-07-04
 */
 
 
@@ -30,13 +30,6 @@
 	#define my_fopen    fopen
 	#define my_fseek    fseek
 	#define my_ftell    ftell
-
-
-	#include <stdio.h>
-//	#include <ext/algorithm>
-	#include <iostream>
-	using namespace std;
-
 #else
 	#define my_fopen    fopen
 	#define my_fseek    _fseeki64
