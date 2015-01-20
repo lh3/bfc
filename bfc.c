@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r142"
+#define BFC_VERSION "r143"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (bfc_bf_is_dump(argv[optind])) bf = bfc_restore(argv[optind]);
+	if (bfc_bf_is_dump(argv[optind])) bf = bfc_bf_restore(argv[optind]);
 	else bf = bfc_count(argv[optind], &opt);
 	if (optind + 1 < argc) bfc_correct(argv[optind+1], &opt, bf);
 	else bfc_bf_dump(0, bf);
