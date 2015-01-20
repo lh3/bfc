@@ -87,6 +87,13 @@ int bfc_ch_get(const bfc_ch_t *ch, const uint64_t x[2])
 	return itr == kh_end(h)? -1 : kh_key(h, itr) & 0x3fff;
 }
 
+int bfc_ch_kmer_occ(const bfc_ch_t *ch, const bfc_kmer_t *z)
+{
+	uint64_t x[2];
+	bfc_kmer_hash(ch->k, z->x, x);
+	return bfc_ch_get(ch, x);
+}
+
 uint64_t bfc_ch_count(const bfc_ch_t *ch)
 {
 	int i;
@@ -167,39 +174,4 @@ bfc_ch_t *bfc_ch_restore(const char *fn)
 int bfc_ch_get_k(const bfc_ch_t *ch)
 {
 	return ch->k;
-}
-
-typedef struct {
-	uint64_t h0:56, ch:8;
-	uint64_t h1:56, cl:6, absent:2;
-} bfc_kcelem_t;
-
-#define kc_hash(a) ((a).h0 + (a).h1)
-#define kc_equal(a, b) ((a).h0 == (b).h0 && (a).h1 == (b).h1)
-KHASH_INIT(kc, bfc_kcelem_t, char, 0, kc_hash, kc_equal)
-
-bfc_kc_t *bfc_kc_init(void) { return kh_init(kc); }
-void bfc_kc_destroy(bfc_kc_t *kc) { kh_destroy(kc, kc); }
-void bfc_kc_clear(bfc_kc_t *kc) { kh_clear(kc, kc); }
-
-int bfc_kc_get(const bfc_ch_t *ch, bfc_kc_t *kc, const bfc_kmer_t *z)
-{
-	int r;
-	uint64_t x[2];
-	bfc_kmer_hash(ch->k, z->x, x);
-	if (kc) {
-		khint_t k;
-		int absent;
-		bfc_kcelem_t key, *p;
-		key.h0 = x[0], key.h1 = x[1];
-		key.ch = key.cl = key.absent = 0; // no effect; only to suppress gcc warnings
-		k = kh_put(kc, kc, key, &absent);
-		p = &kh_key(kc, k);
-		if (absent) {
-			r = bfc_ch_get(ch, x);
-			if (r >= 0) p->ch = r&0xff, p->cl = r>>8&0x3f, p->absent = 0;
-			else p->ch = p->cl = 0, p->absent = 1;
-		} else r = p->absent? -1 : p->cl<<8 | p->ch;
-	} else r = bfc_ch_get(ch, x);
-	return r;
 }

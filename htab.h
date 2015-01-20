@@ -19,12 +19,6 @@ int bfc_ch_dump(const bfc_ch_t *ch, const char *fn);
 bfc_ch_t *bfc_ch_restore(const char *fn);
 int bfc_ch_get_k(const bfc_ch_t *ch);
 
-struct kh_kc_s;
-typedef struct kh_kc_s bfc_kc_t;
-
-bfc_kc_t *bfc_kc_init(void);
-void bfc_kc_destroy(bfc_kc_t *kc);
-void bfc_kc_clear(bfc_kc_t *kc);
-int bfc_kc_get(const bfc_ch_t *ch, bfc_kc_t *kc, const bfc_kmer_t *z);
+int bfc_ch_kmer_occ(const bfc_ch_t *ch, const bfc_kmer_t *z);
 
 #endif

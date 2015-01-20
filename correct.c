@@ -60,7 +60,7 @@ static void bfc_seq_revcomp(ecseq_t *seq)
  * Independent ec routines *
  ***************************/
 
-int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch, bfc_kc_t *kc)
+int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch)
 {
 	int i, j, max = 0, max_ec = -1, max2 = 0;
 	for (i = 0; i < k; ++i) {
@@ -70,7 +70,7 @@ int bfc_ec_greedy_k(int k, int mode, const bfc_kmer_t *x, const bfc_ch_t *ch, bf
 			int ret;
 			if (j == c) continue;
 			bfc_kmer_change(k, y.x, i, j);
-			ret = bfc_kc_get(ch, kc, &y);
+			ret = bfc_ch_kmer_occ(ch, &y);
 			if (ret < 0) continue;
 			if ((max&0xff) < (ret&0xff)) max2 = max, max = ret, max_ec = i<<2 | j;
 			else if ((max2&0xff) < (ret&0xff)) max2 = ret;
@@ -93,7 +93,7 @@ int bfc_ec_first_kmer(int k, const ecseq_t *s, int start, bfc_kmer_t *x)
 	return i;
 }
 
-void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, bfc_kc_t *kc)
+void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch)
 {
 	int i, l, r, j;
 	bfc_kmer_t x = bfc_kmer_null;
@@ -103,7 +103,7 @@ void bfc_ec_kcov(int k, int min_occ, ecseq_t *s, const bfc_ch_t *ch, bfc_kc_t *k
 		if (c->b < 4) {
 			bfc_kmer_append(k, x.x, c->b);
 			if (++l >= k) {
-				if ((r = bfc_kc_get(ch, kc, &x)) >= 0) {
+				if ((r = bfc_ch_kmer_occ(ch, &x)) >= 0) {
 					if ((r>>8&0x3f) >= min_occ+1) c->high_end = 1;
 					if ((r&0xff) >= min_occ) {
 						c->solid_end = 1;
@@ -161,7 +161,6 @@ typedef struct {
 typedef struct {
 	const bfc_opt_t *opt;
 	const bfc_ch_t *ch;
-	bfc_kc_t *kc;
 	kvec_t(echeap1_t) heap;
 	kvec_t(ecstack1_t) stack;
 	ecseq_t seq, tmp, ec[2];
@@ -176,13 +175,11 @@ static bfc_ec1buf_t *ec1buf_init(const bfc_opt_t *opt, const bfc_ch_t *ch)
 	bfc_ec1buf_t *e;
 	e = calloc(1, sizeof(bfc_ec1buf_t));
 	e->opt = opt, e->ch = ch;
-	e->kc = bfc_kc_init();
 	return e;
 }
 
 static void ec1buf_destroy(bfc_ec1buf_t *e)
 {	
-	bfc_kc_destroy(e->kc);
 	free(e->heap.a); free(e->stack.a); free(e->seq.a); free(e->tmp.a); free(e->ec[0].a); free(e->ec[1].a);
 	free(e);
 }
@@ -284,7 +281,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (c && c->b < 4) { // A, C, G or T
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
-				os = bfc_kc_get(e->ch, e->kc, &x);
+				os = bfc_ch_kmer_occ(e->ch, &x);
 				++(*n_lookups);
 				if (c->q && (os&0xff) >= e->opt->min_cov + 1 && c->lcov >= e->opt->min_cov + 1) fixed = 1;
 				else if (c->hcov > e->opt->k * .75) fixed = 1;
@@ -306,7 +303,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 						if (z.ecpos[BFC_EC_HIST-1] >= 0 && z.i - z.ecpos[BFC_EC_HIST-1] < e->opt->win_multi_ec) continue; // no clustered corrections
 					}
 					bfc_kmer_append(e->opt->k, x.x, b);
-					s = bfc_kc_get(e->ch, e->kc, &x);
+					s = bfc_ch_kmer_occ(e->ch, &x);
 					++(*n_lookups);
 					if (bfc_verbose >= 4 && s >= 0)
 						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d\n", "ACGTN"[b], s&0xff, s>>8&0x3f);
@@ -382,19 +379,18 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	uint64_t r, n_lookups = 0;
 	ecstat_t s;
 
-	bfc_kc_clear(e->kc);
 	s.failed = 1, s.n_ec = 0, s.n_ec_high = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	for (i = 0; i < e->seq.n; ++i)
 		if (e->seq.a[i].ob > 3) ++n_n;
 	if (n_n > e->seq.n * .05) return s;
-	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch);
 	r = bfc_ec_best_island(e->opt->k, &e->seq);
 	if (r == 0) { // no solid k-mer
 		bfc_kmer_t x;
 		int ec = -1;
 		while ((end = bfc_ec_first_kmer(e->opt->k, &e->seq, start, &x)) < e->seq.n) {
-			ec = bfc_ec_greedy_k(e->opt->k, e->mode, &x, e->ch, e->kc);
+			ec = bfc_ec_greedy_k(e->opt->k, e->mode, &x, e->ch);
 			if (ec >= 0) break;
 			if (end + (e->opt->k>>1) >= e->seq.n) break;
 			start = end - (e->opt->k>>1);
@@ -430,7 +426,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		if (qual) qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
 	}
 	if (bfc_verbose >= 4) {
-		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch, e->kc);
+		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch);
 		fprintf(stderr, "* failed:%d n_ec:%d n_ec_high:%d\n  ", s.failed, s.n_ec, s.n_ec_high);
 		for (i = 0; i < e->seq.n; ++i)
 			fputc((e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b], stderr);
