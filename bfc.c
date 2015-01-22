@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r152"
+#define BFC_VERSION "r154"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -40,6 +40,7 @@ static void usage(FILE *fp, bfc_opt_t *o)
 	fprintf(fp, "Options:\n");
 	fprintf(fp, "  -t INT       number of threads [%d]\n", o->n_threads);
 	fprintf(fp, "  -H INT       use INT hash functions for Bloom filter [%d]\n", o->n_hashes);
+	fprintf(fp, "  -b INT       set Bloom filter size to pow(2,INT) bits [auto]\n");
 	fprintf(fp, "  -c INT       min k-mer coverage [%d]\n", o->min_cov);
 	fprintf(fp, "  -w INT       no more than %d ec or %d highQ ec in INT-bp window [%d]\n", BFC_EC_HIST, BFC_EC_HIST_HIGH, o->win_multi_ec);
 	fprintf(fp, "  -T           trim/drop uncorrectable regions/reads\n");
@@ -57,11 +58,12 @@ int main(int argc, char *argv[])
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
-	while ((c = getopt(argc, argv, "1ThvV:k:L:t:H:q:Jc:w:DQ")) >= 0) {
+	while ((c = getopt(argc, argv, "1ThvV:k:L:t:H:q:Jc:w:DQb:")) >= 0) {
 		if (c == 'q') opt.q = atoi(optarg);
 		else if (c == 't') opt.n_threads = atoi(optarg);
 		else if (c == 'H') opt.n_hashes = atoi(optarg);
 		else if (c == 'c') opt.min_cov = atoi(optarg);
+		else if (c == 'b') opt.bf_shift = atoi(optarg);
 		else if (c == 'w') opt.win_multi_ec = atoi(optarg);
 		else if (c == 'D') opt.discard = 1;
 		else if (c == 'Q') opt.no_qual = 1;

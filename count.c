@@ -67,9 +67,10 @@ bfc_bf_t *bfc_count(const char *fn, bfc_opt_t *opt)
 	cs.bk = bkmer_open(fn);
 	opt->k = cs.bk->k;
 	for (i = 0, x = 1; x < cs.bk->tot_kmers; ++i, x <<= 1);
-	opt->bf_shift = i + 5 < BFC_MAX_BF_SHIFT? i + 5 : BFC_MAX_BF_SHIFT;
+	if (opt->bf_shift < i)
+		opt->bf_shift = i + 4 < BFC_MAX_BF_SHIFT? i + 4 : BFC_MAX_BF_SHIFT;
 	if (bfc_verbose >= 3)
-		fprintf(stderr, "[M::%s] k=%d, tot_mers=%lld\n", __func__, opt->k, (long long)cs.bk->tot_kmers);
+		fprintf(stderr, "[M::%s] k=%d, tot_mers=%lld, bf_shift=%d\n", __func__, opt->k, (long long)cs.bk->tot_kmers, opt->bf_shift);
 	cs.opt = opt;
 	cs.bf = bfc_bf_init(opt->bf_shift, opt->n_hashes);
 	kt_pipeline(opt->no_mt_io? 1 : 2, bfc_count_cb, &cs, 2);
