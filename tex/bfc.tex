@@ -135,32 +135,34 @@ not tested.
 {\footnotesize
 \begin{tabular}{lcrrcccr}
 \toprule
-Prog.     & $k$ & Time & RAM   & Perfect & Chimeric & Better & Worse \\
+Prog.     & $k$ & Time  & RAM   & Perfect&Chim.& Better & Worse \\
 \midrule
-BFC       & 37    & 7.4h & 63.5G &{\bf 3.04M}& 12.5k  & 830k   & 9.7k \\
-BLESS     & 31    & 6.5h & 22.3G & 2.91M   & 13.1k    & 674k   & 20.8k \\
-BLESS     & 55    & 5.2h & 22.3G & 3.01M   & 11.5k    & 775k   & 10.3k \\
-BLESS     & 63    & 5.2h & 22.3G & 3.01M  &{\bf 11.4k}& 767k   &{\bf 7.4k} \\
-Bloocoo   & 31    &5.7h&{\bf 4.0G}& 2.88M  & 14.1k    & 764k   & 31.5k  \\
-Fermi2    & 29    &17.2h & 64.7G & 3.00M   & 17.7k    &{\bf 849k}&42.8k \\
-Lighter   & 31    &{\bf 3.2h}& 13.4G&2.98M & 13.0k    & 756k   & 30.1k  \\
-Musket    & 27    &21.6h & 77.5G & 2.94M   & 22.5k    & 790k   & 36.3k  \\
-SGA       & 55    &48.7h & 35.6G & 3.01M   & 12.1k    & 755k   & 12.8k  \\
+BFC-ht    & 37  & 6h33m & 63.5G & 3.04M  & 12.5k  & 830k   & 9.7k \\
+BFC-bf    & 31  & 7h32m & 23.3G & 3.01M  & 13.1k  & 783k   &{\bf 9.2k}\\
+BFC-bf    & 55  & 4h41m & 23.3G&{\bf 3.05M}&11.8k & 819k   & 11.4k \\
+BLESS     & 31  & 6h31m & 22.3G & 2.91M  & 13.1k  & 674k   & 20.8k \\
+BLESS     & 55  & 5h09m & 22.3G & 3.01M  &{\bf 11.5k}& 775k& 10.3k \\
+Bloocoo   & 31  & 5h52m &{\bf 4.0G}&2.88M& 14.1k  & 764k   & 31.5k  \\
+Fermi2    & 29  &17h14m & 64.7G & 3.00M  & 17.7k  &{\bf 849k}&42.8k \\
+Lighter   & 31  &{\bf 3h14m}& 13.4G&2.98M& 13.0k  & 756k   & 30.1k  \\
+Musket    & 27  &21h33m & 77.5G & 2.94M  & 22.5k  & 790k   & 36.3k  \\
+SGA       & 55  &48h40m & 35.6G & 3.01M  & 12.1k  & 755k   & 12.8k  \\
 \botrule
 \end{tabular}}{4.45 million pairs of $\sim$150bp reads were
 downloaded from BaseSpace, under the sample ``NA12878-L7'' of project
 ``HiSeq X Ten: TruSeq Nano (4 replicates of NA12878)''. Reads were corrected
 together. 55-mer for SGA was used according to its paper. The maximal k-mer
-length was used for other tools except BLESS. On a subset of two million
-randomly sampled read pairs, the original and the corrected sequences were
-mapped to hs37d5 (http://bit.ly/GRCh37d5) with BWA-MEM~\citep{Li:2013aa}. A
-read is said to become \emph{better} (or \emph{worse}) if the best alignment of
-the corrected sequence has more (or fewer) identical bases than the best of the
-original sequence. The table gives $k$-mer size, the wall-clock \emph{time} when 16 threads
-are specified if possible, the peak \emph{RAM} measured by GNU time, number of
-corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads,
-number of corrected reads becoming \emph{better} and the number of reads
-becoming \emph{worse} than the original.}
+length was used for other tools except BLESS and BFC-bf. On a subset of two
+million randomly sampled read pairs, the original and the corrected sequences
+were mapped to hs37d5 (http://bit.ly/GRCh37d5) with BWA-MEM~\citep{Li:2013aa}.
+A read is said to become \emph{better} (or \emph{worse}) if the best alignment
+of the corrected sequence has more (or fewer) identical bases to the reference
+genome than the best alignment of the original sequence. The table gives
+$k$-mer size, the wall-clock \emph{time} when 16 threads are specified if
+possible, the peak \emph{RAM} measured by GNU time, number of corrected reads
+mapped \emph{perfectly}, number of \emph{chimeric} reads, number of corrected
+reads becoming \emph{better} and the number of reads becoming \emph{worse} than
+the original reads.}
 % Fiona, Trowel and AllPaths-LG used >11GB RAM and got manually killed
 % RACER uses more RAM than input read bases (Molnar and Ilie, 2014). It is not tested.
 
