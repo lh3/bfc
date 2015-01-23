@@ -5,7 +5,7 @@
 #include "htab.h"
 #include "bseq.h"
 
-#define BFC_MAX_KMER     37
+#define BFC_MAX_KMER     63
 #define BFC_MAX_BF_SHIFT 37
 
 #define BFC_MAX_PATHS 8

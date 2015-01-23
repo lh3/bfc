@@ -20,8 +20,11 @@ bfc_ch_t *bfc_ch_init(int k, int l_pre)
 {
 	bfc_ch_t *ch;
 	int i;
+	assert(k <= 63);
 	if (k * 2 - l_pre > BFC_CH_KEYBITS)
 		l_pre = k * 2 - BFC_CH_KEYBITS;
+	if (l_pre > BFC_CH_MAXPRE) l_pre = BFC_CH_MAXPRE;
+	assert(k - l_pre < BFC_CH_KEYBITS);
 	ch = calloc(1, sizeof(bfc_ch_t));
 	ch->k = k, ch->l_pre = l_pre;
 	ch->h = calloc(1<<ch->l_pre, sizeof(void*));
@@ -48,7 +51,8 @@ static inline cnthash_t *get_subhash(const bfc_ch_t *ch, const uint64_t x[2], ui
 		return ch->h[z>>t];
 	} else {
 		int t = ch->k - ch->l_pre;
-		*key = ((x[0] & ((1ULL<<t) - 1)) << ch->k | x[1]) << 14 | 1;
+		int shift = t + ch->k < BFC_CH_KEYBITS? ch->k : BFC_CH_KEYBITS - t;
+		*key = ((x[0] & ((1ULL<<t) - 1)) << shift ^ x[1]) << 14 | 1;
 		return ch->h[x[0]>>t];
 	}
 }

@@ -81,10 +81,20 @@ does not contain any trusted $k$-mers, BFC exhaustively tests all $k$-mer
 one hamming distance away from the first $k$-mer on the read to find a trusted
 $k$-mer. It marks the read uncorrectable if this fails.
 
+We provided two related implementations of Algorithm~1, BFC-bf and BFC-ht.
+BFC-bf uses KMC2~\citep{kmc2}, a disk-based $k$-mer counter, to get exact
+$k$-mers counts and then keeps trusted $k$-mers in a Bloom filter. BFC-ht uses
+a combination of bloom filter and in-memory hash table to derive approximate
+$k$-mer counts~\citep{Melsted:2011bh} and counts of $k$-mers consisting of Q20
+bases.  We modified Algorithm~1 such that missing trusted high-quality $k$-mers
+incurs an extra penalty. This supposedly helps to improve systematic sequencing
+errors. On the downside, BFC-ht is slower, more memory hungry and can only
+work with 37-mer or shorter due to an implementation constraint.
+
 \begin{algorithm}[ht]
 \DontPrintSemicolon
 \footnotesize
-\KwIn{K-mer size $k$, set $\mathcal{H}$ of trusted k-mers, and one string $S$}
+\KwIn{K-mer size $k$, set $\mathcal{H}$ of trusted $k$-mers, and one string $S$}
 \KwOut{Set of corrected positions and bases changed to}
 \BlankLine
 \textbf{Function} {\sc CorrectErrors}$(k, \mathcal{H}, S)$
@@ -116,17 +126,17 @@ $k$-mer. It marks the read uncorrectable if this fails.
 
 \section{Results and Discussions}
 
-We evaluated BFC along with BLESS~\citep{Heo:2014aa},
-Bloocoo~\citep{Drezen:2014aa}, fermi2~\citep{Li:2012fk},
-Lighter~\citep{Song:2014aa}, Musket~\citep{Liu:2013ac} and
-SGA~\citep{Simpson:2012aa} on real data (Table~1). We ran the tools on a Linux
-server with 20 cores of Intel XXX CPUs with 128GB RAM. The command lines were
-included in the BFC source code package (http://bit.ly/bfc-eval).  We have
-considered AllPaths-LG~\citep{Gnerre:2011ys}, Coral~\citep{Salmela:2011aa},
-Fiona~\citep{Schulz:2014aa}, HiTEC~\citep{Ilie:2011fk},
-RACER~\citep{Ilie:2013aa}, SHREC~\citep{Schroder:2009uq} and
-Trowel~\citep{Lim:2014aa}, but they require more RAM than our machine, so were
-not tested.
+We evaluated BFC along with BLESS-v0p23~\citep{Heo:2014aa},
+Bloocoo-1.0.4~\citep{Drezen:2014aa}, fermi2-r175~\citep{Li:2012fk},
+Lighter-1.0.4~\citep{Song:2014aa}, Musket-1.1~\citep{Liu:2013ac} and
+SGA-0.9.13~\citep{Simpson:2012aa} on real data (Table~1). We ran the tools on a
+Linux server with 20 cores of Intel E5-2660 CPUs with 128GB RAM. The command
+lines were included in the BFC source code package (http://bit.ly/bfc-eval).
+We have considered AllPaths-LG~\citep{Gnerre:2011ys},
+Coral~\citep{Salmela:2011aa}, Fiona~\citep{Schulz:2014aa},
+HiTEC~\citep{Ilie:2011fk}, RACER~\citep{Ilie:2013aa},
+SHREC~\citep{Schroder:2009uq} and Trowel~\citep{Lim:2014aa}, but they require
+more RAM than our machine, so were not tested.
 
 
 

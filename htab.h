@@ -5,6 +5,7 @@
 #include "kmer.h"
 
 #define BFC_CH_KEYBITS 50
+#define BFC_CH_MAXPRE  24
 
 struct bfc_ch_s;
 typedef struct bfc_ch_s bfc_ch_t;

@@ -576,7 +576,7 @@ void bfc_correct(const char *fn, const bfc_opt_t *opt, const void *ptr)
 		for (i = 0; i < opt->n_threads; ++i)
 			es.e[i] = ec1buf_init(opt, ch), es.e[i]->mode = mode;
 		es.ks = bseq_open(fn);
-		kt_pipeline(opt->no_mt_io? 1 : 3, bfc_ec_cb, &es, 3);
+		kt_pipeline(opt->no_mt_io? 1 : 2, bfc_ec_cb, &es, 3);
 		bseq_close(es.ks);
 		for (i = 0; i < opt->n_threads; ++i)
 			ec1buf_destroy(es.e[i]);
