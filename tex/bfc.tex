@@ -69,7 +69,7 @@ error free and we remove line~1, this algorithm finds the optimal corrected
 sequence.
 
 The worse-case time complexity of Algorithm~1 is exponential in the length of
-the read. In implementation, we skip line~1 if the read base is Q20 and the
+the read. In implementation, we skip line~2 if the read base is Q20 and the
 $k$-mer ending at it is trusted, or if five bases or two Q20 bases have been
 corrected in the last 10bp window by default. The heuristics reduce the
 search space. If BFC still takes too many iterations before finding an optimal
@@ -82,14 +82,21 @@ one hamming distance away from the first $k$-mer on the read to find a trusted
 $k$-mer. It marks the read uncorrectable if this fails.
 
 We provided two related implementations of Algorithm~1, BFC-bf and BFC-ht.
-BFC-bf uses KMC2~\citep{kmc2}, a disk-based $k$-mer counter, to get exact
-$k$-mers counts and then keeps trusted $k$-mers in a Bloom filter. BFC-ht uses
-a combination of bloom filter and in-memory hash table to derive approximate
-$k$-mer counts~\citep{Melsted:2011bh} and counts of $k$-mers consisting of Q20
-bases.  We modified Algorithm~1 such that missing trusted high-quality $k$-mers
-incurs an extra penalty. This supposedly helps to improve systematic sequencing
-errors. On the downside, BFC-ht is slower, more memory hungry and can only
-work with 37-mer or shorter due to an implementation constraint.
+BFC-bf uses KMC2~\citep{kmc2} to get exact $k$-mers counts and then keeps
+trusted $k$-mers in a bloom filter. BFC-ht uses a combination of bloom filter
+and in-memory hash table to derive approximate $k$-mer
+counts~\citep{Melsted:2011bh} and counts of $k$-mers consisting of Q20 bases.
+We modified Algorithm~1 such that missing trusted high-quality $k$-mers incurs
+an extra penalty. This supposedly helps to correct systematic sequencing errors
+which are recurrent but have lower base quality.
+
+To take advantage of multiple CPU cores, we implemented a blocked bloom
+filter~\citep{DBLP:conf/wea/PutzeSS07} with a 1-byte spin lock for every
+63-byte block to prevent concurrent modifications to the same block.  For human
+data, we used an array of 16 million (=$2^{24}$) hash tables to keep $k$-mer
+counts. Each hash table has a spin lock. With a good hash function, locking is
+infrequent. We also put computing and I/O on different threads.  The strategy
+is particularly useful when I/O is slow.
 
 \begin{algorithm}[ht]
 \DontPrintSemicolon
@@ -111,7 +118,7 @@ work with 37-mer or shorter due to an implementation constraint.
 				\eIf (\Comment*[f]{good read base; no penalty}) {$W'\in\mathcal{H}$} {
 					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p))$\;
 				} (\Comment*[f]{bad read base; penalize}) {
-					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p+1))$\;
+					\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p+1))$\;
 				}
 			} \ElseIf (\Comment*[f]{make a correction with penalty}) {$W'\in \mathcal{H}$} {
 				\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}\cup\{(i,a)\},p+1))$\;
@@ -130,17 +137,18 @@ We evaluated BFC along with BLESS-v0p23~\citep{Heo:2014aa},
 Bloocoo-1.0.4~\citep{Drezen:2014aa}, fermi2-r175~\citep{Li:2012fk},
 Lighter-1.0.4~\citep{Song:2014aa}, Musket-1.1~\citep{Liu:2013ac} and
 SGA-0.9.13~\citep{Simpson:2012aa} on real data (Table~1). We ran the tools on a
-Linux server with 20 cores of Intel E5-2660 CPUs with 128GB RAM. The command
+Linux server with 20 cores of Intel E5-2660 CPUs and 128GB RAM. The command
 lines were included in the BFC source code package (http://bit.ly/bfc-eval).
-We have considered AllPaths-LG~\citep{Gnerre:2011ys},
-Coral~\citep{Salmela:2011aa}, Fiona~\citep{Schulz:2014aa},
-HiTEC~\citep{Ilie:2011fk}, RACER~\citep{Ilie:2013aa},
-SHREC~\citep{Schroder:2009uq} and Trowel~\citep{Lim:2014aa}, but they require
-more RAM than our machine, so were not tested.
+Noteably, BLESS and Lighter only read and write uncompressed files.  BFC and
+fermi2 fully operate on gzip'd files. Other tools take compressed files as
+input but output uncompressed data. We have also considered
+AllPaths-LG~\citep{Gnerre:2011ys}, Coral~\citep{Salmela:2011aa},
+Fiona~\citep{Schulz:2014aa}, HiTEC~\citep{Ilie:2011fk},
+RACER~\citep{Ilie:2013aa}, SHREC~\citep{Schroder:2009uq} and
+Trowel~\citep{Lim:2014aa}, but they require more RAM than our machine, so were
+not tested.
 
-
-
-\begin{table}[ht]
+\begin{table}[t]
 \processtable{Performance of error correction}
 {\footnotesize
 \begin{tabular}{lcrrcccr}
@@ -148,8 +156,9 @@ more RAM than our machine, so were not tested.
 Prog.     & $k$ & Time  & RAM   & Perfect&Chim.& Better & Worse \\
 \midrule
 BFC-ht    & 37  & 6h33m & 63.5G & 3.04M  & 12.5k  & 830k   & 9.7k \\
-BFC-bf    & 31  & 7h32m & 23.3G & 3.01M  & 13.1k  & 783k   &{\bf 9.2k}\\
-BFC-bf    & 55  & 4h41m & 23.3G&{\bf 3.05M}&11.8k & 819k   & 11.4k \\
+BFC-ht    & 55  & 5h51m & 67.9G &{\bf 3.05M}&11.7k& 830k   &{\bf 9.0k}\\
+BFC-bf    & 31  & 7h32m & 23.3G & 3.01M  & 13.1k  & 783k   & 9.2k \\
+BFC-bf    & 55  & 4h41m & 23.3G &{\bf 3.05M}&11.8k& 819k   & 11.4k \\
 BLESS     & 31  & 6h31m & 22.3G & 2.91M  & 13.1k  & 674k   & 20.8k \\
 BLESS     & 55  & 5h09m & 22.3G & 3.01M  &{\bf 11.5k}& 775k& 10.3k \\
 Bloocoo   & 31  & 5h52m &{\bf 4.0G}&2.88M& 14.1k  & 764k   & 31.5k  \\
@@ -158,25 +167,48 @@ Lighter   & 31  &{\bf 3h14m}& 13.4G&2.98M& 13.0k  & 756k   & 30.1k  \\
 Musket    & 27  &21h33m & 77.5G & 2.94M  & 22.5k  & 790k   & 36.3k  \\
 SGA       & 55  &48h40m & 35.6G & 3.01M  & 12.1k  & 755k   & 12.8k  \\
 \botrule
-\end{tabular}}{4.45 million pairs of $\sim$150bp reads were
-downloaded from BaseSpace, under the sample ``NA12878-L7'' of project
-``HiSeq X Ten: TruSeq Nano (4 replicates of NA12878)''. Reads were corrected
-together. 55-mer for SGA was used according to its paper. The maximal k-mer
-length was used for other tools except BLESS and BFC-bf. On a subset of two
-million randomly sampled read pairs, the original and the corrected sequences
-were mapped to hs37d5 (http://bit.ly/GRCh37d5) with BWA-MEM~\citep{Li:2013aa}.
-A read is said to become \emph{better} (or \emph{worse}) if the best alignment
-of the corrected sequence has more (or fewer) identical bases to the reference
-genome than the best alignment of the original sequence. The table gives
-$k$-mer size, the wall-clock \emph{time} when 16 threads are specified if
-possible, the peak \emph{RAM} measured by GNU time, number of corrected reads
-mapped \emph{perfectly}, number of \emph{chimeric} reads, number of corrected
-reads becoming \emph{better} and the number of reads becoming \emph{worse} than
-the original reads.}
-% Fiona, Trowel and AllPaths-LG used >11GB RAM and got manually killed
-% RACER uses more RAM than input read bases (Molnar and Ilie, 2014). It is not tested.
-
+\end{tabular}}{4.45 million pairs of $\sim$150bp reads were downloaded from
+BaseSpace, under the sample ``NA12878-L7'' of project ``HiSeq X Ten: TruSeq
+Nano (4 replicates of NA12878)'', and were corrected together. On a subset of
+two million randomly sampled read pairs, the original and the corrected
+sequences were mapped to hs37d5 (http://bit.ly/GRCh37d5) with
+BWA-MEM~\citep{Li:2013aa}.  A read is said to become \emph{better} (or
+\emph{worse}) if the best alignment of the corrected sequence has more (or
+fewer) identical bases to the reference genome than the best alignment of the
+original sequence. The table gives $k$-mer size (maximal size used for Bloocoo,
+fermi2, Lighter and Musket), the wall-clock \emph{time} when 16 threads are
+specified if possible, the peak \emph{RAM} measured by GNU time, number of
+corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads,
+number of corrected reads becoming \emph{better} and the number of reads
+becoming \emph{worse} than the original reads. For each metric, the best tool
+is highlighted in the bold fontface.}
 \end{table}
+
+As is shown in the table, Lighter is the fastest, though it is not as fast on
+compressed data (22h52m).  BFC, BLESS and Bloocoo are comparable in speed.
+Bloocoo is the most lightweight.  BFC-bf and BLESS, which also use disk-based
+$k$-mer counting and bloom filter like Bloocoo, could in principle achieve a
+similar memory footprint at the cost of speed. We have not fully explored all
+the options. Hash table based implementations, BFC-ht, fermi2 and Musket, are
+most memory hungry.
+
+Broadly, the evaluated tools have comparable accuracy. Both BFC implementations
+appear to be better marginally, correcting more reads with few overcorrections
+when a similar $k$-mer length is in use. The theoretically better non-greedy
+algorithm could be an explanation to the differences, but subtle implementation
+details could contribute, too. Separating algorithms and implementations is
+frequently hard in evaluations.
+
+It is evident that using longer $k$-mers for correction is beneficial, probably
+because longer $k$-mers resolve more repeat sequences. On this data set, KMC2
+counted 3.05 billion unqiue 55-mers occuring twice or more, but only 2.84
+billion 31-mers -- 55-mers could resolve 6.8\% more bases [=(3.05-2.84)/3.05].
+Although longer $k$-mers usually lead to more uncorrectable reads as the
+correction tool cannot find a trusted $k$-mer to start with, these
+uncorrectable reads tend to be randomly distributed in the genome.  They are
+less influential than uncorrectable reads due to repeats which tend to to
+systematic. We recommend to use longer $k$-mer for spectrum-based error
+correction.
 
 \section*{Acknowledgement}
 \paragraph{Funding\textcolon} NHGRI U54HG003037; NIH GM100233
