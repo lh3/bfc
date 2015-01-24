@@ -40,7 +40,21 @@ some false positives) and identifies the longest stretch in a read that has
 hits in the bloom filter. K-mer trimming is about four times as fast as error
 correction.
 
+## BFC-KMC
+
+An alternative implementation of the algorithm is available at the [kmc
+branch][kmc-branch] of this repository. It uses [KMC2][kmc] for k-mer counting
+and keeps high-occurrence k-mers in a bloom filter. BFC-KMC should be invoked as:
+```sh
+kmc -k55 reads.fq.gz prefix tmpdir
+bfc-kmc -t16 prefix reads.fq.gz | gzip -1 > corrected.fq.gz
+```
+KMC2 source code and precompiled binaries are available at the [KMC
+website][kmc].
+
 [Euler]: http://www.ncbi.nlm.nih.gov/pubmed/11504945
 [bfcounter]: http://www.ncbi.nlm.nih.gov/pubmed/21831268
 [lighter]: https://github.com/mourisl/Lighter
 [bless]: https://sourceforge.net/p/bless-ec/wiki/Home/
+[kmc-branch]: https://github.com/lh3/bfc/tree/kmc
+[kmc]: http://sun.aei.polsl.pl/kmc/index.html

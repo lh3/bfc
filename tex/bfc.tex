@@ -133,20 +133,20 @@ is particularly useful when I/O is slow.
 
 \section{Results and Discussions}
 
-We evaluated BFC along with BLESS-v0p23~\citep{Heo:2014aa},
-Bloocoo-1.0.4~\citep{Drezen:2014aa}, fermi2-r175~\citep{Li:2012fk},
-Lighter-1.0.4~\citep{Song:2014aa}, Musket-1.1~\citep{Liu:2013ac} and
+We evaluated BFC along with BBMap-34.38 (\mbox{http://bit.ly/bbMap}),
+BLESS-v0p23~\citep{Heo:2014aa}, Bloocoo-1.0.4~\citep{Drezen:2014aa},
+fermi2-r175~\citep{Li:2012fk}, Lighter-20140123~\citep{Song:2014aa},
+Musket-1.1~\citep{Liu:2013ac}, QuroUM~\citep{Zimin:2013aa} and
 SGA-0.9.13~\citep{Simpson:2012aa} on real data (Table~1). We ran the tools on a
 Linux server with 20 cores of Intel E5-2660 CPUs and 128GB RAM. The command
 lines were included in the BFC source code package (http://bit.ly/bfc-eval).
-Noteably, BLESS and Lighter only read and write uncompressed files.  BFC and
-fermi2 fully operate on gzip'd files. Other tools take compressed files as
-input but output uncompressed data. We have also considered
+Notably, BLESS and QuorUM only work with uncompressed files. The rest of tools
+were provided with gzip'd files as input. We have also considered
 AllPaths-LG~\citep{Gnerre:2011ys}, Coral~\citep{Salmela:2011aa},
 Fiona~\citep{Schulz:2014aa}, HiTEC~\citep{Ilie:2011fk},
-RACER~\citep{Ilie:2013aa}, SHREC~\citep{Schroder:2009uq} and
-Trowel~\citep{Lim:2014aa}, but they require more RAM than our machine, so were
-not tested.
+RACER~\citep{Ilie:2013aa}, SHREC~\citep{Schroder:2009uq},
+SOAPec~\citep{Luo:2012aa} and Trowel~\citep{Lim:2014aa}, but they require more
+RAM than our machine or failed to run, so were not tested.
 
 \begin{table}[t]
 \processtable{Performance of error correction}
@@ -163,7 +163,7 @@ BLESS     & 31  & 6h31m & 22.3G & 2.91M  & 13.1k  & 674k   & 20.8k \\
 BLESS     & 55  & 5h09m & 22.3G & 3.01M  &{\bf 11.5k}& 775k& 10.3k \\
 Bloocoo   & 31  & 5h52m &{\bf 4.0G}&2.88M& 14.1k  & 764k   & 31.5k  \\
 Fermi2    & 29  &17h14m & 64.7G & 3.00M  & 17.7k  &{\bf 849k}&42.8k \\
-Lighter   & 31  &{\bf 3h14m}& 13.4G&2.98M& 13.0k  & 756k   & 30.1k  \\
+Lighter   & 31  & 5h12m & 13.4G & 2.98M  & 13.0k  & 756k   & 30.1k  \\
 Musket    & 27  &21h33m & 77.5G & 2.94M  & 22.5k  & 790k   & 36.3k  \\
 SGA       & 55  &48h40m & 35.6G & 3.01M  & 12.1k  & 755k   & 12.8k  \\
 \botrule
@@ -184,13 +184,12 @@ becoming \emph{worse} than the original reads. For each metric, the best tool
 is highlighted in the bold fontface.}
 \end{table}
 
-As is shown in the table, Lighter is the fastest, though it is not as fast on
-compressed data (22h52m).  BFC, BLESS and Bloocoo are comparable in speed.
-Bloocoo is the most lightweight.  BFC-bf and BLESS, which also use disk-based
-$k$-mer counting and bloom filter like Bloocoo, could in principle achieve a
-similar memory footprint at the cost of speed. We have not fully explored all
-the options. Hash table based implementations, BFC-ht, fermi2 and Musket, are
-most memory hungry.
+As is shown in the table, BFC, BLESS, Bloocoo and Lighter are comparable in
+speed. Bloocoo is the most lightweight. BFC-bf and BLESS, which also use
+disk-based $k$-mer counting and bloom filter like Bloocoo, could in principle
+achieve a similar memory footprint at the cost of speed. We have not fully
+explored all the options. Hash table based implementations, BFC-ht, fermi2 and
+Musket, are most memory hungry.
 
 Broadly, the evaluated tools have comparable accuracy. Both BFC implementations
 appear to be better marginally, correcting more reads with few overcorrections

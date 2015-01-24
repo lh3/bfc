@@ -9,23 +9,29 @@ may decompress the raw data or create one interleaved FASTQ.
 
 ## Hardware and Software
 
-Fiona and Bloocoo provide precompiled binaries. We compiled the rest of tools
-on a CentOS5 virtual machine. The executables are [available here][biobin].
-We ran all the tools on a CentOS6 machine with 20 cores of Intel XXXX CPUs and
-128GB RAM, and measured timing and peak memory with GNU time.
+Fiona, BBMap and Bloocoo provide precompiled binaries. We compiled the rest of
+tools on a CentOS5 virtual machine. The executables are [available
+here][biobin].  We ran all the tools on a CentOS6 machine with 20 cores of
+Intel E5-2660 CPUs at 2.2GHz and 128GB RAM, and measured timing and peak memory
+with GNU time.
 
 ## Command Lines
 
 
 ```sh
-# BFC-r118 for separate FASTQ (timing reported in the manuscript)
-bash -c "bfc -s 3g -t 16 <(seqtk mergepe read1.fq.gz read2.fq.gz) <(seqtk mergepe read1.fq.gz read2.fq.gz) | gzip -1 > ec.fq.gz"
+# BBMap-34.38
+ecc.sh -Xmx32g in=read1.fastq.gz in2=read2.fastq.gz out=ec.fq tmpdir=tmp threads=16 ecc=t aec=t k=31
 
-# BFC-r118 for interleaved FASTQ (NOT reported in the manuscript)
-bfc -s 3g -t16 read12.fq.gz | gzip -1 > ec.fq.gz
+# BFC-r155
+bash -c "bfc -s 3g -k55 -t 16 <(seqtk mergepe read1.fq.gz read2.fq.gz) <(seqtk mergepe read1.fq.gz read2.fq.gz) | gzip -1 > ec.fq.gz"
+
+# BFC-kmc
+echo -e "read1.fq.gz\nread2.fq.gz" > list.txt
+kmc -k55 -m24 @list.txt reads.k55 tmp
+seqtk mergepe read1.fq.gz read2.fq.gz | bfc-kmc -t16 reads.k55 | gzip -1 > ec.fq.gz
 
 # BLESS-v0p23 (much faster than v0p17 or earlier)
-bless -read1 read1.fq -read2 read2.fq -kmerlength 31 -prefix out -smpthread 16 -max_mem 24 -notrim
+bless -read1 read1.fq -read2 read2.fq -kmerlength 55 -prefix out -smpthread 16 -max_mem 24 -notrim
 
 # Bloocoo-1.0.4
 Bloocoo -nb-cores 16 -file read12.fq -kmer-size 31
@@ -34,8 +40,11 @@ Bloocoo -nb-cores 16 -file read12.fq -kmer-size 31
 seqtk mergepe read1.fq.gz read2.fq.gz | ropebwt2 -drq20 -x31 > index.fmd
 seqtk mergepe read1.fq.gz read2.fq.gz | fermi2 correct -t 16 -k 29 index.fmd /dev/stdin | gzip -1 > ec.fq.gz
 
-# Lighter-1.0.4 (7 times as slow on gzip'd input)
-lighter -K 31 3000000000 -r read1.fq -r read2.fq -t 16
+# Lighter-20140123
+lighter -K 31 3000000000 -r read1.fq.gz -r read2.fq.gz -t 16
+
+# QuorUM-1.0.0
+quorum -s 12000000000 -t 16 -p quorum-k31 -k 31 read1.fq read2.fq
 
 # SGA-0.9.13
 sga preprocess -p 1 read1.fq.gz read2.fq.gz | gzip -1 > out.pe.fq.gz
@@ -52,20 +61,17 @@ fiona -g 3000000000 --sequencing-technology illumina --no-final-trim-ns -nt 16 r
 
 ## Comments
 
-1. Fermi2 and SGA are probably spending a couple of hours on gzip'd I/O. BFC
-   is better as it puts I/O on separate threads. Lighter works with gzip'd I/O
-   in principle, but is seven times as slow when input is gzip'd compressed.
-   Other tools do not support gzip'd I/O.
-
-2. Early versions of BLESS were slow reportedly ([Molnar and Ilie,
-   2014][review]) and did not work with unequal read lengths. More recent
+1. Early versions of BLESS were single-threaded and slow ([Molnar and Ilie,
+   2014][review]), and did not work with unequal read lengths. More recent
    versions are much better.
 
-3. In addition to tools shown in the table, we have also tried
+2. In addition to tools shown in the table, we have also tried
    [Trowel-0.1.4.1][trowel], [Fiona-0.2.0][fiona] and
    [AllPathsLG-51828][allpath]. They were taking over 110GB RAM and got
-   manually killed. [RACER][racer] requires more RAM than the total read bases
-   (>120GB) [according to][review] the developers. It is not tested.
+   manually killed. [Coral][coral], [HiTEC][hitec] and [SHREC][shrec] are
+   unable to work with data at this scale according to a few publications.
+   [RACER][racer] requires more RAM than the total read bases (>120GB)
+   [according to][review] the developers. These tools are not tested.
 
 [basespace]: https://basespace.illumina.com/datacentral
 [biobin]: https://sourceforge.net/projects/biobin/
@@ -75,3 +81,6 @@ fiona -g 3000000000 --sequencing-technology illumina --no-final-trim-ns -nt 16 r
 [allpath]: http://www.broadinstitute.org/software/allpaths-lg/blog/
 [racer]: http://www.csd.uwo.ca/~ilie/RACER/
 [time]: https://ftp.gnu.org/gnu/time/
+[coral]: http://www.cs.helsinki.fi/u/lmsalmel/coral/
+[hitec]: http://www.csd.uwo.ca/~ilie/HiTEC/
+[shrec]: https://sourceforge.net/projects/shrec-ec/
