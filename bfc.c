@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r156"
+#define BFC_VERSION "r162"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -43,7 +43,7 @@ void bfc_opt_by_size(bfc_opt_t *opt, long size)
 {
 	double bits;
 	bits = log(size) / log(2);
-	opt->k = (int)(bits * 1.75);
+	opt->k = (int)(bits * 1.2);
 	if ((opt->k&1) == 0) ++opt->k; // should always be an odd number
 	if (opt->k > BFC_MAX_KMER)
 		opt->k = BFC_MAX_KMER;
