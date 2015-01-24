@@ -19,7 +19,7 @@ with GNU time.
 
 
 ```sh
-# BBMap-34.38
+# BBMap-34.38 (using ecclimit=14 made little difference)
 ecc.sh -Xmx32g in=read1.fastq.gz in2=read2.fastq.gz out=ec.fq tmpdir=tmp threads=16 ecc=t aec=t k=31
 
 # BFC-r155
@@ -40,6 +40,9 @@ Bloocoo -nb-cores 16 -file read12.fq -kmer-size 31
 seqtk mergepe read1.fq.gz read2.fq.gz | ropebwt2 -drq20 -x31 > index.fmd
 seqtk mergepe read1.fq.gz read2.fq.gz | fermi2 correct -t 16 -k 29 index.fmd /dev/stdin | gzip -1 > ec.fq.gz
 
+# Fiona-0.2.0 (killed due to large memory footprint)
+fiona -g 3000000000 --sequencing-technology illumina --no-final-trim-ns -nt 16 read12.fq ec.fq
+
 # Lighter-20140123
 lighter -K 31 3000000000 -r read1.fq.gz -r read2.fq.gz -t 16
 
@@ -54,9 +57,6 @@ sga correct -t 16 -k 55 --learn out.pe.fq.gz
 # Trowel-0.1.4.1 (killed due to large memory footprint)
 echo "read1.fq read2.fq" > list.txt
 trowel -t 16 -f list.txt -k 31 -ntr
-
-# Fiona-0.2.0 (killed due to large memory footprint)
-fiona -g 3000000000 --sequencing-technology illumina --no-final-trim-ns -nt 16 read12.fq ec.fq
 ```
 
 ## Comments

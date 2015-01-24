@@ -28,9 +28,9 @@
 \begin{abstract}
 \section{Summary:} We present a new tool to correct sequencing errors in
 Illumina data produced from whole-genome shotgun resequencing. It uses a
-non-greedy algorithm and shows comparable performance, better usability and
-higher accuracy in an evaluation that has the most complete collection of
-high-performance error correctors.
+non-greedy algorithm and shows comparable performance and higher accuracy in an
+evaluation that has the most complete collection of high-performance error
+correctors so far.
 
 \section{Availability and implementation:} https://github.com/lh3/bfc
 
@@ -39,7 +39,7 @@ high-performance error correctors.
 
 \section{Introduction}
 
-\emph{Error correction} is a process to fix sequencing errors on a sequence read
+Error correction is a process to fix sequencing errors on a sequence read
 by using other overlapping reads that do not contain the errors. Many \emph{de
 novo} assemblers, in particular short-read assemblers for large genomes, use
 error correction to reduce the complexity of the assembly graph such that the
@@ -56,7 +56,7 @@ there is an error-free $k$-mer in the read.
 
 \begin{methods}
 \section{Methods}
-Algorithm~1 is the key component of the BFC method. It defines a \emph{state}
+Algorithm~1 is the key component of BFC. It defines a \emph{state}
 of correction as a 4-tuple $(i,W,\mathcal{C},p)$, which consists of the
 position $i$ of the preceding base, the last \mbox{($k$-1)--mer} $W$ ending at
 $i$, the set $\mathcal{C}$ of previous corrected positions and bases (called a
@@ -65,11 +65,19 @@ keeps all possible states in a priority queue $\mathcal{Q}$. At each iteration,
 it retrieves the state $(i,W,\mathcal{C},p)$ with the lowest penalty $p$ and
 adds a new state $(i+1,W[1,k-2]\circ a,\mathcal{C}',p')$ if $a$ is the read
 base or $W\circ a$ is a trusted $k$-mer. If the first $k$-mer in $S$ is
-error free and we remove line~1, this algorithm finds the optimal corrected
+error free and we remove line~2, this algorithm finds the optimal corrected
 sequence.
 
+It is possible to modify the algorithm to correct insertion and deletion
+errors by augmenting the set of the ``next bases'' at line~1 to:
+$$\mathcal{N}=\{(j,a)|j\in\{i-1,i\},a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}\}\cup\{(i,\epsilon)\}$$
+In this set, $(i,a)$ substitutes a base at position $i$, $(i,\epsilon)$ deletes
+the base and $(i-1,a)$ inserts a base $a$ before $i$. We have not
+implemented this insertion/deletion-aware algorithm because such
+errors are rare in Illumina data.
+
 The worse-case time complexity of Algorithm~1 is exponential in the length of
-the read. In implementation, we skip line~2 if the read base is Q20 and the
+the read. In implementation, we skip line~3 if the read base is Q20 and the
 $k$-mer ending at it is trusted, or if five bases or two Q20 bases have been
 corrected in the last 10bp window by default. The heuristics reduce the
 search space. If BFC still takes too many iterations before finding an optimal
@@ -112,16 +120,17 @@ is particularly useful when I/O is slow.
 		$(i, W, \mathcal{C}, p)\gets${\sc HeapPopBest}$(\mathcal{Q})$\Comment*[r]{current best state}
 		$i\gets i+1$\;
 		\lIf{$i=|S|$} { {\bf return} $\mathcal{C}$ \Comment*[f]{reaching the end of $S$}}
-		\ForEach (\Comment*[f]{try all possible next bases}) {$a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}$} {
+		\nl$\mathcal{N}\gets\{(i,{\rm A}),(i,{\rm C}),(i,{\rm G}),(i,{\rm T})\}$\Comment*[r]{set of next bases}
+		\ForEach (\Comment*[f]{try all possible next bases}) {$(j,a)\in\mathcal{N}$} {
 			$W'\gets W\circ a$\Comment*[r]{``$\circ$'' concatenates strings}
-			\uIf (\Comment*[f]{``$a$'' is the read base}) {$a=S[i]$} {
+			\uIf (\Comment*[f]{no correction}) {$i=j$ {\bf and} $a=S[j]$} {
 				\eIf (\Comment*[f]{good read base; no penalty}) {$W'\in\mathcal{H}$} {
-					{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p))$\;
+					{\sc HeapPush}$(\mathcal{Q}, (j,W'[1,k-1],\mathcal{C}, p))$\;
 				} (\Comment*[f]{bad read base; penalize}) {
-					\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}, p+1))$\;
+					\nl{\sc HeapPush}$(\mathcal{Q}, (j,W'[1,k-1],\mathcal{C}, p+1))$\;
 				}
 			} \ElseIf (\Comment*[f]{make a correction with penalty}) {$W'\in \mathcal{H}$} {
-				\nl{\sc HeapPush}$(\mathcal{Q}, (i,W'[1,k-1],\mathcal{C}\cup\{(i,a)\},p+1))$\;
+				\nl{\sc HeapPush}$(\mathcal{Q}, (j,W'[1,k-1],\mathcal{C}\cup\{(j,a)\},p+1))$\;
 			}
 		}
 	}
@@ -136,23 +145,26 @@ is particularly useful when I/O is slow.
 We evaluated BFC along with BBMap-34.38 (\mbox{http://bit.ly/bbMap}),
 BLESS-v0p23~\citep{Heo:2014aa}, Bloocoo-1.0.4~\citep{Drezen:2014aa},
 fermi2-r175~\citep{Li:2012fk}, Lighter-20140123~\citep{Song:2014aa},
-Musket-1.1~\citep{Liu:2013ac}, QuroUM~\citep{Zimin:2013aa} and
-SGA-0.9.13~\citep{Simpson:2012aa} on real data (Table~1). We ran the tools on a
-Linux server with 20 cores of Intel E5-2660 CPUs and 128GB RAM. The command
-lines were included in the BFC source code package (http://bit.ly/bfc-eval).
-Notably, BLESS and QuorUM only work with uncompressed files. The rest of tools
-were provided with gzip'd files as input. We have also tried
-AllPaths-LG~\citep{Gnerre:2011ys}, Fiona~\citep{Schulz:2014aa},
-SOAPec~\citep{Luo:2012aa} and Trowel~\citep{Lim:2014aa}, but they require more
-RAM than our machine or failed to run, so were not tested.
+Musket-1.1~\citep{Liu:2013ac} and SGA-0.9.13~\citep{Simpson:2012aa} on real
+data (Table~1). We ran the tools on a Linux server with 20 cores of Intel
+E5-2660 CPUs and 128GB RAM. Precompiled binaries are available through
+http://bit.ly/biobin and the command lines were included in the BFC source code
+package (http://bit.ly/bfc-eval).  Notably, BLESS only works with uncompressed
+files. The rest of tools were provided with gzip'd files as input. We have also
+tried AllPaths-LG~\citep{Gnerre:2011ys}, Fiona~\citep{Schulz:2014aa} and
+Trowel~\citep{Lim:2014aa}, but they require more RAM than our machine.
+QuorUM-1.0.0~\citep{Zimin:2013aa} always trims reads, making it hard to be
+compared to others which keep full-length reads.
 
 \begin{table}[t]
 \processtable{Performance of error correction}
 {\footnotesize
-\begin{tabular}{lcrrcccr}
+\begin{tabular}{lcrrccrr}
 \toprule
 Prog.     & $k$ & Time  & RAM   & Perfect&Chim.& Better & Worse \\
 \midrule
+raw data  & --  & --    & --    & 2.40M  & 12.4k  & --     & -- \\
+BBMap     & 31  &{\bf 3h22m}&33.0G& 2.78M& 12.4k  & 505k   & 19.2k \\
 BFC-ht    & 37  & 6h33m & 63.5G & 3.04M  & 12.5k  & 830k   & 9.7k \\
 BFC-ht    & 55  & 5h51m & 67.9G &{\bf 3.05M}&11.7k& 830k   &{\bf 9.0k}\\
 BFC-bf    & 31  & 7h32m & 23.3G & 3.01M  & 13.1k  & 783k   & 9.2k \\
@@ -182,14 +194,14 @@ becoming \emph{worse} than the original reads. For each metric, the best tool
 is highlighted in the bold fontface.}
 \end{table}
 
-As is shown in the table, BFC, BLESS, Bloocoo and Lighter are comparable in
-speed. Bloocoo is the most lightweight. BFC-bf and BLESS, which also use
-disk-based $k$-mer counting and bloom filter like Bloocoo, could in principle
-achieve a similar memory footprint at the cost of speed. We have not fully
-explored all the options. Hash table based implementations, BFC-ht, fermi2 and
-Musket, are most memory hungry.
+As is shown in the table, BBMap is the fastest. BFC, BLESS, Bloocoo and Lighter
+are comparable in speed. Bloocoo is the most lightweight. BFC-bf and BLESS,
+which also use disk-based $k$-mer counting and bloom filter like Bloocoo, could
+in principle achieve a similar memory footprint at the cost of speed. We have
+not fully explored all the options. Hash table based implementations, BFC-ht,
+fermi2 and Musket, are most memory hungry as is expected.
 
-Broadly, the evaluated tools have comparable accuracy. Both BFC implementations
+Most evaluated tools have broadly comparable accuracy. Both BFC implementations
 appear to be better marginally, correcting more reads with few overcorrections
 when a similar $k$-mer length is in use. The theoretically better non-greedy
 algorithm could be an explanation to the differences, but subtle implementation
@@ -198,14 +210,19 @@ frequently hard in evaluations.
 
 It is evident that using longer $k$-mers for correction is beneficial, probably
 because longer $k$-mers resolve more repeat sequences. On this data set, KMC2
-counted 3.05 billion unqiue 55-mers occuring twice or more, but only 2.84
+counted 3.05 billion unique 55-mers occurring twice or more, but only 2.84
 billion 31-mers -- 55-mers could resolve 6.8\% more bases [=(3.05-2.84)/3.05].
 Although longer $k$-mers usually lead to more uncorrectable reads as the
 correction tool cannot find a trusted $k$-mer to start with, these
 uncorrectable reads tend to be randomly distributed in the genome.  They are
-less influential than uncorrectable reads due to repeats which tend to to
+less influential than uncorrectable reads caused by repeats which tend to to
 systematic. We recommend to use longer $k$-mer for spectrum-based error
 correction.
+
+Error correction is primarily used in the context of {\it de novo} assembly.
+However, assembling many human data sets and evaluating the resulting
+assemblies is still nontrivial. Closely studying the effect of error
+correction in human assembly will be one of our future directions.
 
 \section*{Acknowledgement}
 \paragraph{Funding\textcolon} NHGRI U54HG003037; NIH GM100233

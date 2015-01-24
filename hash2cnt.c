@@ -34,6 +34,11 @@ int main(int argc, char *argv[])
 	if ((fp = fopen(argv[optind], "rb")) == 0) return 1;
 	fread(t, 4, 2, fp);
 	k = t[0], l_pre = t[1];
+	if (k > 37) {
+		fprintf(stderr, "ERROR: hash2cnt does not work for k>37\n");
+		fclose(fp);
+		return 1;
+	}
 	mask = (1ULL<<k) - 1;
 	for (i = 0; i < 1<<l_pre; ++i) {
 		uint64_t tmp;
