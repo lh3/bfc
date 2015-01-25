@@ -202,27 +202,22 @@ not fully explored all the options. Hash table based implementations, BFC-ht,
 fermi2 and Musket, are most memory hungry as is expected.
 
 Most evaluated tools have broadly comparable accuracy. Both BFC implementations
-appear to be better marginally, correcting more reads with few overcorrections
-when a similar $k$-mer length is in use. The theoretically better non-greedy
-algorithm could be an explanation to the differences, but subtle implementation
-details could contribute, too. Separating algorithms and implementations is
-frequently hard in evaluations.
+are marginally better, correcting more reads with few overcorrections when a
+similar $k$-mer length is in use. The theoretically better non-greedy algorithm
+could be an explanation to the differences, but subtle implementation details
+could contribute, too. Separating algorithms and implementations is frequently
+hard in evaluations.
 
-It is evident that using longer $k$-mers for correction is beneficial, probably
-because longer $k$-mers resolve more repeat sequences. On this data set, KMC2
-counted 3.05 billion unique 55-mers occurring twice or more, but only 2.84
-billion 31-mers -- 55-mers could resolve 6.8\% more bases [=(3.05-2.84)/3.05].
-Although longer $k$-mers usually lead to more uncorrectable reads as the
-correction tool cannot find a trusted $k$-mer to start with, these
-uncorrectable reads tend to be randomly distributed in the genome.  They are
-less influential than uncorrectable reads caused by repeats which tend to to
-systematic. We recommend to use longer $k$-mer for spectrum-based error
-correction.
-
-Error correction is primarily used in the context of {\it de novo} assembly.
-However, assembling many human data sets and evaluating the resulting
-assemblies is still nontrivial. Closely studying the effect of error
-correction in human assembly will be one of our future directions.
+It may appear that using longer $k$-mers for correction is beneficial. This is
+probably because longer $k$-mers resolve more repeat sequences. On this data
+set, KMC2 counted 3.05 billion unique 55-mers occurring twice or more, but only
+2.84 billion 31-mers -- 55-mers could resolve 6.8\% more bases
+[=(3.05-2.84)/3.05]. However, long $k$-mers lead to reduced $k$-mer depth,
+which is magnified by the increased chance of having an error on a long $k$-mer.
+The reduced depth especially in low-coverage regions may affect the contiguity
+of an assembly. We ran the fermi2 assembler~\citep{Li:2012fk} on the 37-mer
+and 55-mer BFC-ht corrected reads. The 37-mer correction leads to longer
+aligned N50 although the 55-mer correction looks better in the table.
 
 \section*{Acknowledgement}
 \paragraph{Funding\textcolon} NHGRI U54HG003037; NIH GM100233
