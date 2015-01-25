@@ -427,9 +427,10 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	s.ec_code = 0, s.n_absent = rv[0] + rv[1];
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
-	if (e->opt->refine_ec && s.n_absent >= e->ori_st.n_absent) {
-		e->ori_st.rf_code = 2;
-		return e->ori_st;
+	if (e->opt->refine_ec && e->ori_st.ec_code == 0 && s.n_absent >= e->ori_st.n_absent) {
+		s = e->ori_st;
+		s.rf_code = 2;
+		return s;
 	}
 	for (i = 0; i < e->seq.n; ++i) {
 		ecbase_t *c = &e->seq.a[i];
