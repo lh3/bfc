@@ -219,9 +219,9 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	ks_heapup_ec(e->heap.n, e->heap.a);
 }
 
-static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *path)
+static int buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *path)
 {
-	int i;
+	int i, n_absent = 0;
 	kv_resize(ecbase_t, *path, seq->n);
 	path->n = seq->n;
 	while (end >= 0) {
@@ -229,14 +229,16 @@ static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *p
 		path->a[i].b = s[end].b;
 		path->a[i].ec = s[end].pen.ec;
 		path->a[i].absent = s[end].pen.absent;
+		n_absent += s[end].pen.absent;
 		end = s[end].parent;
 	}
+	return n_absent;
 }
 
 static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
 {
 	echeap1_t z;
-	int i, l, err_ret = -1, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
+	int i, l, rv = -1, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
 	assert(end <= seq->n && end - start >= e->opt->k);
 	if (bfc_verbose >= 4) fprintf(stderr, "* bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
@@ -260,7 +262,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	while (1) {
 		int stop = 0;
 		if (e->heap.n == 0) { // may happen when there is an uncorrectable "N"
-			err_ret = -2;
+			rv = -2;
 			break;
 		}
 		z = e->heap.a[0];
@@ -325,7 +327,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (fixed == 0 && other_ext == 0) ++n_failures;
 			if (n_failures > seq->n * 2) {
 				if (bfc_verbose >= 4) fprintf(stderr, "  !! too many unsuccessful attempts\n");
-				err_ret = -3;
+				rv = -3;
 				break;
 			}
 			if (c || n_added == 1) {
@@ -355,9 +357,9 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		}
 	} // ~while(1)
 	// backtrack
-	if (n_paths == 0) return err_ret;
+	if (n_paths == 0) return rv;
 	assert(min_path >= 0 && min_path < n_paths && e->stack.a[path[min_path]].tot_pen == min_path_pen);
-	buf_backtrack(e->stack.a, path[min_path], seq, ec);
+	rv = buf_backtrack(e->stack.a, path[min_path], seq, ec);
 	for (i = 0; i < ec->n; ++i) // mask out uncorrected regions
 		if (i < start + e->opt->k || i >= end) ec->a[i].b = 4;
 	if (bfc_verbose >= 4) {
@@ -365,7 +367,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		for (i = 0; i < ec->n; ++i) fputc((seq->a[i].b == ec->a[i].b? "ACGTN":"acgtn")[ec->a[i].b], stderr);
 		fputc('\n', stderr);
 	}
-	return 0;
+	return rv;
 }
 
 #define FAILED_MISC      1
@@ -378,15 +380,16 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 
 typedef struct {
 	uint32_t failed:3, brute:1, n_ec:14, n_ec_high:14;
+	int n_absent;
 } ecstat_t;
 
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
-	int i, start = 0, end = 0, n_n = 0, rv;
+	int i, start = 0, end = 0, n_n = 0, rv[2];
 	uint64_t r;
 	ecstat_t s;
 
-	s.failed = FAILED_MISC, s.brute = 0, s.n_ec = 0, s.n_ec_high = 0;
+	s.failed = FAILED_MISC, s.brute = 0, s.n_ec = 0, s.n_ec_high = 0, s.n_absent = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	for (i = 0; i < e->seq.n; ++i)
 		if (e->seq.a[i].ob > 3) ++n_n;
@@ -416,16 +419,16 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
-	if ((rv = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n)) < 0) {
-		s.failed = rv == -2? FAILED_UNCORR_N : rv == -3? FAILED_MANY_FAIL : FAILED_MISC;
+	if ((rv[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n)) < 0) {
+		s.failed = rv[0] == -2? FAILED_UNCORR_N : rv[0] == -3? FAILED_MANY_FAIL : FAILED_MISC;
 		return s;
 	}
 	bfc_seq_revcomp(&e->seq);
-	if ((rv = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n)) < 0) {
-		s.failed = rv == -2? FAILED_UNCORR_N : rv == -3? FAILED_MANY_FAIL : FAILED_MISC;
+	if ((rv[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n)) < 0) {
+		s.failed = rv[1] == -2? FAILED_UNCORR_N : rv[1] == -3? FAILED_MANY_FAIL : FAILED_MISC;
 		return s;
 	}
-	s.failed = 0;
+	s.failed = 0, s.n_absent = rv[0] + rv[1];
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
 	for (i = 0; i < e->seq.n; ++i) {
@@ -517,6 +520,7 @@ static void worker_ec(void *_data, long k, int tid)
 		}
 		st = bfc_ec1(es->e[tid], s->seq, s->qual);
 		s->aux = st.n_ec<<18 | st.n_ec_high<<4 | st.brute<<3 | st.failed;
+		s->aux2 = st.n_absent;
 	} else {
 		uint64_t max;
 		max = max_streak(es->opt->k, es->bf, s);
@@ -566,7 +570,7 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 				if (!s->comment) {
 					printf("\tec:Z:%c", FAILED_LABEL[s->aux&7]);
 					if ((s->aux&7) == 0)
-						printf("_%d_%d_%d", s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff);
+						printf("_%d_%d_%d_%d", s->aux2, s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff);
 				} else printf("\t%s", s->comment);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
