@@ -233,10 +233,10 @@ static void buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *p
 	}
 }
 
-static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end, uint64_t *n_lookups)
+static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
 {
 	echeap1_t z;
-	int i, l, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
+	int i, l, err_ret = -1, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
 	assert(end <= seq->n && end - start >= e->opt->k);
 	if (bfc_verbose >= 4) fprintf(stderr, "* bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
@@ -260,8 +260,8 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	while (1) {
 		int stop = 0;
 		if (e->heap.n == 0) { // may happen when there is an uncorrectable "N"
-			if (n_paths) break;
-			else return -2;
+			err_ret = -2;
+			break;
 		}
 		z = e->heap.a[0];
 		e->heap.a[0] = kv_pop(e->heap);
@@ -282,7 +282,6 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 				bfc_kmer_t x = z.x;
 				bfc_kmer_append(e->opt->k, x.x, c->b);
 				os = bfc_ch_kmer_occ(e->ch, &x);
-				++(*n_lookups);
 				if (c->q && (os&0xff) >= e->opt->min_cov + 1 && c->lcov >= e->opt->min_cov + 1) fixed = 1;
 				else if (c->hcov > e->opt->k * .75) fixed = 1;
 				if (bfc_verbose >= 4) {
@@ -304,7 +303,6 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					}
 					bfc_kmer_append(e->opt->k, x.x, b);
 					s = bfc_ch_kmer_occ(e->ch, &x);
-					++(*n_lookups);
 					if (bfc_verbose >= 4 && s >= 0)
 						fprintf(stderr, "     Alternative k-mer count: %c,%d:%d\n", "ACGTN"[b], s&0xff, s>>8&0x3f);
 					if (s < 0 || (s&0xff) < e->opt->min_cov) continue; // not solid
@@ -327,6 +325,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 			if (fixed == 0 && other_ext == 0) ++n_failures;
 			if (n_failures > seq->n * 2) {
 				if (bfc_verbose >= 4) fprintf(stderr, "  !! too many unsuccessful attempts\n");
+				err_ret = -3;
 				break;
 			}
 			if (c || n_added == 1) {
@@ -356,7 +355,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		}
 	} // ~while(1)
 	// backtrack
-	if (n_paths == 0) return -3;
+	if (n_paths == 0) return err_ret;
 	assert(min_path >= 0 && min_path < n_paths && e->stack.a[path[min_path]].tot_pen == min_path_pen);
 	buf_backtrack(e->stack.a, path[min_path], seq, ec);
 	for (i = 0; i < ec->n; ++i) // mask out uncorrected regions
@@ -369,21 +368,32 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	return 0;
 }
 
+#define FAILED_MISC      1
+#define FAILED_MANY_N    2
+#define FAILED_NO_SOLID  3
+#define FAILED_UNCORR_N  4
+#define FAILED_MANY_FAIL 5
+
+#define FAILED_LABEL "PMNSNF??"
+
 typedef struct {
-	uint32_t failed:1, n_ec:16, n_ec_high:15;
+	uint32_t failed:3, brute:1, n_ec:14, n_ec_high:14;
 } ecstat_t;
 
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
-	int i, start = 0, end = 0, n_n = 0;
-	uint64_t r, n_lookups = 0;
+	int i, start = 0, end = 0, n_n = 0, rv;
+	uint64_t r;
 	ecstat_t s;
 
-	s.failed = 1, s.n_ec = 0, s.n_ec_high = 0;
+	s.failed = FAILED_MISC, s.brute = 0, s.n_ec = 0, s.n_ec_high = 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	for (i = 0; i < e->seq.n; ++i)
 		if (e->seq.a[i].ob > 3) ++n_n;
-	if (n_n > e->seq.n * .05) return s;
+	if (n_n > e->seq.n * .05) {
+		s.failed = FAILED_MANY_N;
+		return s;
+	}
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch);
 	r = bfc_ec_best_island(e->opt->k, &e->seq);
 	if (r == 0) { // no solid k-mer
@@ -398,13 +408,23 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 		if (ec >= 0) {
 			e->seq.a[end - (ec>>2)].b = ec&3;
 			++end; start = end - e->opt->k;
-		} else return s; // cannot find a solid k-mer anyway
+			s.brute = 1;
+		} else {
+			s.failed = FAILED_NO_SOLID;
+			return s;
+		}
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
-	if (bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n, &n_lookups) < 0) return s;
+	if ((rv = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n)) < 0) {
+		s.failed = rv == -2? FAILED_UNCORR_N : rv == -3? FAILED_MANY_FAIL : FAILED_MISC;
+		return s;
+	}
 	bfc_seq_revcomp(&e->seq);
-	if (bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n, &n_lookups) < 0) return s;
+	if ((rv = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n)) < 0) {
+		s.failed = rv == -2? FAILED_UNCORR_N : rv == -3? FAILED_MANY_FAIL : FAILED_MISC;
+		return s;
+	}
 	s.failed = 0;
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
@@ -435,8 +455,6 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			fputc('0' + (int)(10. * e->seq.a[i].lcov / e->opt->k + .499), stderr);
 		fputc('\n', stderr);
 	}
-	if (bfc_verbose >= 4)
-		fprintf(stderr, "* number of hash table lookups: %ld\n", (long)n_lookups);
 	return s;
 }
 
@@ -492,7 +510,7 @@ static void worker_ec(void *_data, long k, int tid)
 		ecstat_t st;
 		if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
 		st = bfc_ec1(es->e[tid], s->seq, s->qual);
-		s->aux = st.n_ec<<16 | st.n_ec_high<<1 | st.failed;
+		s->aux = st.n_ec<<18 | st.n_ec_high<<4 | st.brute<<3 | st.failed;
 	} else {
 		uint64_t max;
 		max = max_streak(es->opt->k, es->bf, s);
@@ -536,9 +554,10 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 			bseq1_t *s = &data->seqs[i];
 			int is_fq = (s->qual && !es->opt->no_qual);
 			if (!es->opt->filter_mode) {
-				if (es->opt->discard && (s->aux&1)) goto bfc_ec_cb_free;
-				printf("%c%s\tec:Z:%c_%d_%d\n%s\n", is_fq? '@' : '>', s->name,
-					   "TF"[s->aux&1], s->aux>>16&0xffff, s->aux>>1&0x7fff, s->seq);
+				if (es->opt->discard && (s->aux&7)) goto bfc_ec_cb_free;
+				printf("%c%s\tec:Z:%c", is_fq? '@' : '>', s->name, FAILED_LABEL[s->aux&7]);
+				if ((s->aux&3) == 0) printf("_%d_%d_%d", s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff);
+				printf("\n%s\n", s->seq);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
 				printf("%c%s\n%s\n", is_fq? '@' : '>', s->name, s->seq);

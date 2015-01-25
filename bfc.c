@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r162"
+#define BFC_VERSION "r164"
 
 int bfc_verbose = 3;
 double bfc_real_time;
