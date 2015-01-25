@@ -8,7 +8,7 @@
 #define BFC_MAX_KMER     63
 #define BFC_MAX_BF_SHIFT 37
 
-#define BFC_MAX_PATHS 8
+#define BFC_MAX_PATHS 4
 #define BFC_EC_HIST 5
 #define BFC_EC_HIST_HIGH 2
 

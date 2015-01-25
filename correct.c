@@ -135,13 +135,20 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 
 #include "ksort.h"
 
+#define ECCODE_MISC      1
+#define ECCODE_MANY_N    2
+#define ECCODE_NO_SOLID  3
+#define ECCODE_UNCORR_N  4
+#define ECCODE_MANY_FAIL 5
+
+typedef struct {
+	uint32_t ec_code:3, brute:1, n_ec:14, n_ec_high:14;
+	uint32_t n_absent:30, rf_code:2;
+} ecstat_t;
+
 typedef struct {
 	uint8_t ec:1, ec_high:1, absent:1, absent_high:1, b:4;
 } bfc_penalty_t;
-
-typedef struct {
-	int n_ec, n_ec_high, n_absent;
-} ecstats_t;
 
 typedef struct {
 	int tot_pen;
@@ -165,6 +172,7 @@ typedef struct {
 	kvec_t(ecstack1_t) stack;
 	ecseq_t seq, tmp, ec[2];
 	int mode;
+	ecstat_t ori_st;
 } bfc_ec1buf_t;
 
 #define heap_lt(a, b) ((a).tot_pen > (b).tot_pen)
@@ -370,31 +378,19 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	return rv;
 }
 
-#define FAILED_MISC      1
-#define FAILED_MANY_N    2
-#define FAILED_NO_SOLID  3
-#define FAILED_UNCORR_N  4
-#define FAILED_MANY_FAIL 5
-
-#define FAILED_LABEL "PMNSNF??"
-
-typedef struct {
-	uint32_t failed:3, brute:1, n_ec:14, n_ec_high:14;
-	int n_absent;
-} ecstat_t;
-
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
 	int i, start = 0, end = 0, n_n = 0, rv[2];
 	uint64_t r;
 	ecstat_t s;
 
-	s.failed = FAILED_MISC, s.brute = 0, s.n_ec = 0, s.n_ec_high = 0, s.n_absent = 0;
+	s.ec_code = ECCODE_MISC, s.brute = 0, s.n_ec = 0, s.n_ec_high = 0, s.n_absent = 0;
+	s.rf_code = e->opt->refine_ec? 1 : 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	for (i = 0; i < e->seq.n; ++i)
 		if (e->seq.a[i].ob > 3) ++n_n;
 	if (n_n > e->seq.n * .05) {
-		s.failed = FAILED_MANY_N;
+		s.ec_code = ECCODE_MANY_N;
 		return s;
 	}
 	bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch);
@@ -413,24 +409,28 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			++end; start = end - e->opt->k;
 			s.brute = 1;
 		} else {
-			s.failed = FAILED_NO_SOLID;
+			s.ec_code = ECCODE_NO_SOLID;
 			return s;
 		}
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
 	if ((rv[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n)) < 0) {
-		s.failed = rv[0] == -2? FAILED_UNCORR_N : rv[0] == -3? FAILED_MANY_FAIL : FAILED_MISC;
+		s.ec_code = rv[0] == -2? ECCODE_UNCORR_N : rv[0] == -3? ECCODE_MANY_FAIL : ECCODE_MISC;
 		return s;
 	}
 	bfc_seq_revcomp(&e->seq);
 	if ((rv[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n)) < 0) {
-		s.failed = rv[1] == -2? FAILED_UNCORR_N : rv[1] == -3? FAILED_MANY_FAIL : FAILED_MISC;
+		s.ec_code = rv[1] == -2? ECCODE_UNCORR_N : rv[1] == -3? ECCODE_MANY_FAIL : ECCODE_MISC;
 		return s;
 	}
-	s.failed = 0, s.n_absent = rv[0] + rv[1];
+	s.ec_code = 0, s.n_absent = rv[0] + rv[1];
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
+	if (e->opt->refine_ec && s.n_absent >= e->ori_st.n_absent) {
+		e->ori_st.rf_code = 2;
+		return e->ori_st;
+	}
 	for (i = 0; i < e->seq.n; ++i) {
 		ecbase_t *c = &e->seq.a[i];
 		if (e->ec[0].a[i].b == e->ec[1].a[i].b)
@@ -450,7 +450,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	}
 	if (bfc_verbose >= 4) {
 		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch);
-		fprintf(stderr, "* failed:%d n_ec:%d n_ec_high:%d\n  ", s.failed, s.n_ec, s.n_ec_high);
+		fprintf(stderr, "* ec_code:%d n_ec:%d n_ec_high:%d\n  ", s.ec_code, s.n_ec, s.n_ec_high);
 		for (i = 0; i < e->seq.n; ++i)
 			fputc((e->seq.a[i].b == e->seq.a[i].ob? "ACGTN" : "acgtn")[e->seq.a[i].b], stderr);
 		fprintf(stderr, "\n  ");
@@ -458,6 +458,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			fputc('0' + (int)(10. * e->seq.a[i].lcov / e->opt->k + .499), stderr);
 		fputc('\n', stderr);
 	}
+	if (e->opt->refine_ec) s.rf_code = 3;
 	return s;
 }
 
@@ -504,6 +505,21 @@ typedef struct {
 	ec_shared_t *es;
 } ec_step_t;
 
+static inline ecstat_t parse_stats(char *str)
+{
+	ecstat_t s;
+	char *p = str;
+	s.ec_code = strtol(p, &p, 10);
+	s.rf_code = 1;
+	if (s.ec_code == 0) {
+		s.n_absent = strtol(p + 1, &p, 10);
+		s.brute = strtol(p + 1, &p, 10);
+		s.n_ec = strtol(p + 1, &p, 10);
+		s.n_ec_high = strtol(p + 1, &p, 10);
+	} else s.n_absent = s.brute = s.n_ec = s.n_ec_high = 0;
+	return s;
+}
+
 static void worker_ec(void *_data, long k, int tid)
 {
 	ec_step_t *data = (ec_step_t*)_data;
@@ -511,16 +527,20 @@ static void worker_ec(void *_data, long k, int tid)
 	bseq1_t *s = &data->seqs[k];
 	if (!es->opt->filter_mode) {
 		ecstat_t st;
+		bfc_ec1buf_t *e = es->e[tid];
 		if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
-		if (es->opt->refine_ec && s->comment && strncmp(s->comment, "ec:Z:P", 6) == 0)
-			return;
+		if (es->opt->refine_ec && s->comment && strncmp(s->comment, "ec:Z:", 5) == 0) {
+			e->ori_st = parse_stats(s->comment + 5);
+			if (e->ori_st.ec_code == 0 && e->ori_st.n_absent == 0)
+				return;
+		}
 		if (s->comment) {
 			free(s->comment);
 			s->comment = 0;
 		}
-		st = bfc_ec1(es->e[tid], s->seq, s->qual);
-		s->aux = st.n_ec<<18 | st.n_ec_high<<4 | st.brute<<3 | st.failed;
-		s->aux2 = st.n_absent;
+		st = bfc_ec1(e, s->seq, s->qual);
+		s->aux = st.n_ec<<18 | st.n_ec_high<<4 | st.brute<<3 | st.ec_code;
+		s->aux2 = st.n_absent << 2 | st.rf_code;
 	} else {
 		uint64_t max;
 		max = max_streak(es->opt->k, es->bf, s);
@@ -568,9 +588,9 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 				if (es->opt->discard && (s->aux&7)) goto bfc_ec_cb_free;
 				printf("%c%s", is_fq? '@' : '>', s->name);
 				if (!s->comment) {
-					printf("\tec:Z:%c", FAILED_LABEL[s->aux&7]);
+					printf("\tec:Z:%d", s->aux&7);
 					if ((s->aux&7) == 0)
-						printf("_%d_%d_%d_%d", s->aux2, s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff);
+						printf("_%d_%d_%d_%d_%d", s->aux2>>2, s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff, s->aux2&3);
 				} else printf("\t%s", s->comment);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
