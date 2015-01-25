@@ -509,6 +509,12 @@ static void worker_ec(void *_data, long k, int tid)
 	if (!es->opt->filter_mode) {
 		ecstat_t st;
 		if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
+		if (es->opt->refine_ec && s->comment && strncmp(s->comment, "ec:Z:P", 6) == 0)
+			return;
+		if (s->comment) {
+			free(s->comment);
+			s->comment = 0;
+		}
 		st = bfc_ec1(es->e[tid], s->seq, s->qual);
 		s->aux = st.n_ec<<18 | st.n_ec_high<<4 | st.brute<<3 | st.failed;
 	} else {
@@ -535,8 +541,9 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 	ec_shared_t *es = (ec_shared_t*)shared;
 	if (step == 0) {
 		ec_step_t *ret;
+		int keep_comment = (es->opt->filter_mode || es->opt->refine_ec);
 		ret = calloc(1, sizeof(ec_step_t));
-		ret->seqs = bseq_read(es->ks, es->opt->chunk_size, &ret->n_seqs);
+		ret->seqs = bseq_read(es->ks, es->opt->chunk_size, keep_comment, &ret->n_seqs);
 		ret->es = es;
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
 		if (ret->seqs) return ret;
@@ -555,16 +562,21 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 			int is_fq = (s->qual && !es->opt->no_qual);
 			if (!es->opt->filter_mode) {
 				if (es->opt->discard && (s->aux&7)) goto bfc_ec_cb_free;
-				printf("%c%s\tec:Z:%c", is_fq? '@' : '>', s->name, FAILED_LABEL[s->aux&7]);
-				if ((s->aux&3) == 0) printf("_%d_%d_%d", s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff);
-				printf("\n%s\n", s->seq);
+				printf("%c%s", is_fq? '@' : '>', s->name);
+				if (!s->comment) {
+					printf("\tec:Z:%c", FAILED_LABEL[s->aux&7]);
+					if ((s->aux&7) == 0)
+						printf("_%d_%d_%d", s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff);
+				} else printf("\t%s", s->comment);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
-				printf("%c%s\n%s\n", is_fq? '@' : '>', s->name, s->seq);
+				printf("%c%s", is_fq? '@' : '>', s->name);
+				if (s->comment) printf("\t%s", s->comment);
 			}
-			if (is_fq) printf("+\n%s\n", s->qual);
+			putchar('\n'); puts(s->seq);
+			if (is_fq) { puts("+"); puts(s->qual); }
 bfc_ec_cb_free:
-			free(s->seq); free(s->qual); free(s->name);
+			free(s->seq); free(s->qual); free(s->comment); free(s->name);
 		}
 		free(data->seqs); free(data);
 	}

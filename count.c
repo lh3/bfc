@@ -94,7 +94,7 @@ static void *bfc_count_cb(void *shared, int step, void *_data)
 	if (step == 0) {
 		cnt_step_t *ret;
 		ret = calloc(1, sizeof(cnt_step_t));
-		ret->seqs = bseq_read(cs->ks, cs->opt->chunk_size, &ret->n_seqs);
+		ret->seqs = bseq_read(cs->ks, cs->opt->chunk_size, 0, &ret->n_seqs);
 		ret->cs = cs;
 		fprintf(stderr, "[M::%s] read %d sequences\n", __func__, ret->n_seqs);
 		if (ret->seqs) return ret;
@@ -117,7 +117,7 @@ static void *bfc_count_cb(void *shared, int step, void *_data)
 			bfc_kmer_bufclear(cs, 1, i);
 		for (i = 0; i < data->n_seqs; ++i) {
 			bseq1_t *s = &data->seqs[i];
-			free(s->seq); free(s->qual); free(s->name);
+			free(s->seq); free(s->qual); free(s->comment); free(s->name);
 		}
 		free(data->seqs); free(data);
 	}

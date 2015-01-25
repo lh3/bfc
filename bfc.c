@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r164"
+#define BFC_VERSION "r165"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -54,7 +54,7 @@ void bfc_opt_by_size(bfc_opt_t *opt, long size)
 
 static void usage(FILE *fp, bfc_opt_t *o)
 {
-	fprintf(fp, "Usage: bfc [options] <in.fq>\n");
+	fprintf(fp, "Usage: bfc [options] <to-count.fq> [to-correct.fq]\n");
 	fprintf(fp, "Options:\n");
 	fprintf(fp, "  -s FLOAT     approx genome size (k/m/g allowed; change -k and -b) [unset]\n");
 	fprintf(fp, "  -k INT       k-mer length [%d]\n", o->k);
@@ -63,6 +63,7 @@ static void usage(FILE *fp, bfc_opt_t *o)
 	fprintf(fp, "  -H INT       use INT hash functions for Bloom filter [%d]\n", o->n_hashes);
 	fprintf(fp, "  -d FILE      dump hash table to FILE [null]\n");
 	fprintf(fp, "  -E           skip error correction\n");
+	fprintf(fp, "  -R           refine bfc-corrected reads\n");
 	fprintf(fp, "  -r FILE      restore hash table from FILE [null]\n");
 	fprintf(fp, "  -w INT       no more than %d ec or 2 highQ ec in INT-bp window [%d]\n", BFC_EC_HIST, o->win_multi_ec);
 	fprintf(fp, "  -c INT       min k-mer coverage [%d]\n", o->min_cov);
@@ -83,7 +84,7 @@ int main(int argc, char *argv[])
 
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
-	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1Q")) >= 0) {
+	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1QR")) >= 0) {
 		if (c == 'k') opt.k = atoi(optarg);
 		else if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
@@ -93,6 +94,7 @@ int main(int argc, char *argv[])
 		else if (c == 'H') opt.n_hashes = atoi(optarg);
 		else if (c == 'c') opt.min_cov = atoi(optarg);
 		else if (c == 'w') opt.win_multi_ec = atoi(optarg);
+		else if (c == 'R') opt.refine_ec = 1;
 		else if (c == 'D') opt.discard = 1;
 		else if (c == '1') opt.filter_mode = 1;
 		else if (c == 'Q') opt.no_qual = 1;
