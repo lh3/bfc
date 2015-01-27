@@ -8,7 +8,7 @@
 #include <math.h>
 #include "bfc.h"
 
-#define BFC_VERSION "r170"
+#define BFC_VERSION "r171"
 
 int bfc_verbose = 3;
 double bfc_real_time;
@@ -85,8 +85,7 @@ int main(int argc, char *argv[])
 	bfc_real_time = realtime();
 	bfc_opt_init(&opt);
 	while ((c = getopt(argc, argv, "hvV:Ed:k:s:b:L:t:C:H:q:Jr:c:w:D1QR")) >= 0) {
-		if (c == 'k') opt.k = atoi(optarg);
-		else if (c == 'd') out_hash = optarg;
+		if (c == 'd') out_hash = optarg;
 		else if (c == 'r') in_hash = optarg;
 		else if (c == 'q') opt.q = atoi(optarg);
 		else if (c == 'b') opt.bf_shift = atoi(optarg);
@@ -101,7 +100,10 @@ int main(int argc, char *argv[])
 		else if (c == 'J') opt.no_mt_io = 1; // for debugging kt_pipeline()
 		else if (c == 'E') no_ec = 1;
 		else if (c == 'V') bfc_verbose = atoi(optarg);
-		else if (c == 'h') {
+		else if (c == 'k') {
+			opt.k = atoi(optarg);
+			fprintf(stderr, "[M::%s] set k to %d\n", __func__, opt.k);
+		} else if (c == 'h') {
 			usage(stdout, &opt);
 			return 0;
 		} else if (c == 'v') {

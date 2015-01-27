@@ -120,7 +120,7 @@ int bfc_ch_hist(const bfc_ch_t *ch, uint64_t cnt[256], uint64_t high[64])
 			if (kh_exist(h, k))
 				++cnt[kh_key(h, k) & 0xff], ++high[kh_key(h, k)>>8 & 0x3f];
 	}
-	for (i = 0, max = 0; i < 256; ++i)
+	for (i = 3, max = 0; i < 256; ++i)
 		if (cnt[i] > max)
 			max = cnt[i], max_i = i;
 	return max_i;
