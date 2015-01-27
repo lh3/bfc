@@ -435,7 +435,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	s.ec_code = 0, s.n_absent = rv[0] + rv[1];
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
-	if (e->opt->refine_ec && e->ori_st.ec_code == 0 && s.n_absent >= e->ori_st.n_absent) {
+	if (e->opt->refine_ec && e->ori_st.ec_code == 0 && (s.max_cnt == 255 || s.max_cnt > e->mode * 3 || s.n_absent >= e->ori_st.n_absent)) {
 		s = e->ori_st;
 		s.rf_code = 2;
 		return s;
@@ -541,7 +541,7 @@ static void worker_ec(void *_data, long k, int tid)
 		if (bfc_verbose >= 4) fprintf(stderr, "* Processing read '%s'...\n", s->name);
 		if (es->opt->refine_ec && s->comment && strncmp(s->comment, "ec:Z:", 5) == 0) {
 			e->ori_st = parse_stats(s->comment + 5);
-			if (e->ori_st.ec_code == 0 && e->ori_st.n_absent == 0)
+			if (e->ori_st.ec_code == 0 && (e->ori_st.n_absent == 0 || e->ori_st.max_cnt == 255))
 				return;
 		}
 		if (s->comment) {
