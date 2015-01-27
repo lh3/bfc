@@ -143,7 +143,7 @@ uint64_t bfc_ec_best_island(int k, const ecseq_t *s)
 
 typedef struct {
 	uint32_t ec_code:3, brute:1, n_ec:14, n_ec_high:14;
-	uint32_t n_absent:30, rf_code:2;
+	uint32_t n_absent:22, rf_code:2, max_cnt:8;
 } ecstat_t;
 
 typedef struct {
@@ -163,6 +163,7 @@ typedef struct {
 	int parent, i, tot_pen;
 	uint8_t b;
 	bfc_penalty_t pen;
+	uint16_t cnt;
 } ecstack1_t;
 
 typedef struct {
@@ -194,7 +195,7 @@ static void ec1buf_destroy(bfc_ec1buf_t *e)
 
 #define weighted_penalty(o, p) ((o)->w_ec * (p).ec + (o)->w_ec_high * (p).ec_high + (o)->w_absent * (p).absent + (o)->w_absent_high * (p).absent_high)
 
-static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen)
+static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen, int cnt)
 {
 	ecstack1_t *q;
 	echeap1_t *r;
@@ -206,6 +207,7 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	q->i = prev->i;
 	q->b = b;
 	q->pen = pen;
+	q->cnt = cnt > 0? cnt&0xff : 0;
 	q->tot_pen = prev->tot_pen + weighted_penalty(o, pen);
 	// update heap
 	kv_pushp(echeap1_t, e->heap, &r);
@@ -227,29 +229,32 @@ static void buf_update(bfc_ec1buf_t *e, const echeap1_t *prev, bfc_penalty_t pen
 	ks_heapup_ec(e->heap.n, e->heap.a);
 }
 
-static int buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *path)
+static int buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *path, int *_max_cnt)
 {
-	int i, n_absent = 0;
+	int i, n_absent = 0, max_cnt = 0;
 	kv_resize(ecbase_t, *path, seq->n);
 	path->n = seq->n;
 	while (end >= 0) {
 		i = s[end].i;
+		max_cnt = max_cnt > s[end].cnt? max_cnt : s[end].cnt;
 		path->a[i].b = s[end].b;
 		path->a[i].ec = s[end].pen.ec;
 		path->a[i].absent = s[end].pen.absent;
 		n_absent += s[end].pen.absent;
 		end = s[end].parent;
 	}
+	*_max_cnt = max_cnt;
 	return n_absent;
 }
 
-static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end)
+static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int start, int end, int *max_cnt)
 {
 	echeap1_t z;
 	int i, l, rv = -1, path[BFC_MAX_PATHS], n_paths = 0, n_failures = 0, min_path = -1, min_path_pen = INT_MAX;
 	assert(end <= seq->n && end - start >= e->opt->k);
 	if (bfc_verbose >= 4) fprintf(stderr, "* bfc_ec1dir(): len:%ld start:%d end:%d\n", seq->n, start, end);
 	e->heap.n = e->stack.n = 0;
+	*max_cnt = 0;
 	memset(&z, 0, sizeof(echeap1_t));
 	kv_resize(ecbase_t, *ec, seq->n);
 	ec->n = seq->n;
@@ -284,7 +289,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 		if (z.i - end > e->opt->max_end_ext) stop = 1;
 		if (!stop) {
 			ecbase_t *c = z.i < seq->n? &seq->a[z.i] : 0;
-			int b, os = -1, fixed = 0, other_ext = 0, n_added = 0;
+			int b, os = -1, fixed = 0, other_ext = 0, n_added = 0, added_cnt[4];
 			bfc_penalty_t added[4];
 			// test if the read extension alone is enough
 			if (z.i > end) fixed = 1;
@@ -322,6 +327,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					pen.absent = 0;
 					pen.absent_high = ((s>>8&0xff) < e->opt->min_cov);
 					pen.b = b;
+					added_cnt[n_added] = s;
 					added[n_added++] = pen;
 					++other_ext;
 				} else {
@@ -329,6 +335,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 					pen.absent = (os < 0 || (os&0xff) < e->opt->min_cov);
 					pen.absent_high = (os < 0 || (os>>8&0xff) < e->opt->min_cov);
 					pen.b = b;
+					added_cnt[n_added] = os;
 					added[n_added++] = pen;
 				}
 			} // ~for(b)
@@ -345,10 +352,10 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 						int t = weighted_penalty(e->opt, added[b]);
 						if (min > t) min = t, min_b = b;
 					}
-					buf_update(e, &z, added[min_b]);
+					buf_update(e, &z, added[min_b], added_cnt[min_b]);
 				} else {
 					for (b = 0; b < n_added; ++b)
-						buf_update(e, &z, added[b]);
+						buf_update(e, &z, added[b], added_cnt[b]);
 				}
 			} else {
 				if (n_added == 0)
@@ -367,7 +374,7 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 	// backtrack
 	if (n_paths == 0) return rv;
 	assert(min_path >= 0 && min_path < n_paths && e->stack.a[path[min_path]].tot_pen == min_path_pen);
-	rv = buf_backtrack(e->stack.a, path[min_path], seq, ec);
+	rv = buf_backtrack(e->stack.a, path[min_path], seq, ec, max_cnt);
 	for (i = 0; i < ec->n; ++i) // mask out uncorrected regions
 		if (i < start + e->opt->k || i >= end) ec->a[i].b = 4;
 	if (bfc_verbose >= 4) {
@@ -380,11 +387,11 @@ static int bfc_ec1dir(bfc_ec1buf_t *e, const ecseq_t *seq, ecseq_t *ec, int star
 
 ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 {
-	int i, start = 0, end = 0, n_n = 0, rv[2];
+	int i, start = 0, end = 0, n_n = 0, rv[2], max_cnt[2];
 	uint64_t r;
 	ecstat_t s;
 
-	s.ec_code = ECCODE_MISC, s.brute = 0, s.n_ec = 0, s.n_ec_high = 0, s.n_absent = 0;
+	s.ec_code = ECCODE_MISC, s.brute = 0, s.n_ec = s.n_ec_high = 0, s.n_absent = s.max_cnt = 0;
 	s.rf_code = e->opt->refine_ec? 1 : 0;
 	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
 	for (i = 0; i < e->seq.n; ++i)
@@ -415,15 +422,16 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 	} else start = r>>32, end = (uint32_t)r;
 	if (bfc_verbose >= 4)
 		fprintf(stderr, "* Longest solid island: [%d,%d)\n", start, end);
-	if ((rv[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n)) < 0) {
+	if ((rv[0] = bfc_ec1dir(e, &e->seq, &e->ec[0], start, e->seq.n, &max_cnt[0])) < 0) {
 		s.ec_code = rv[0] == -2? ECCODE_UNCORR_N : rv[0] == -3? ECCODE_MANY_FAIL : ECCODE_MISC;
 		return s;
 	}
 	bfc_seq_revcomp(&e->seq);
-	if ((rv[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n)) < 0) {
+	if ((rv[1] = bfc_ec1dir(e, &e->seq, &e->ec[1], e->seq.n - end, e->seq.n, &max_cnt[1])) < 0) {
 		s.ec_code = rv[1] == -2? ECCODE_UNCORR_N : rv[1] == -3? ECCODE_MANY_FAIL : ECCODE_MISC;
 		return s;
 	}
+	s.max_cnt = max_cnt[0] > max_cnt[1]? max_cnt[0] : max_cnt[1];
 	s.ec_code = 0, s.n_absent = rv[0] + rv[1];
 	bfc_seq_revcomp(&e->ec[1]);
 	bfc_seq_revcomp(&e->seq);
@@ -514,6 +522,7 @@ static inline ecstat_t parse_stats(char *str)
 	s.rf_code = 1;
 	if (s.ec_code == 0) {
 		s.n_absent = strtol(p + 1, &p, 10);
+		s.max_cnt = strtol(p + 1, &p, 10);
 		s.brute = strtol(p + 1, &p, 10);
 		s.n_ec = strtol(p + 1, &p, 10);
 		s.n_ec_high = strtol(p + 1, &p, 10);
@@ -541,7 +550,7 @@ static void worker_ec(void *_data, long k, int tid)
 		}
 		st = bfc_ec1(e, s->seq, s->qual);
 		s->aux = st.n_ec<<18 | st.n_ec_high<<4 | st.brute<<3 | st.ec_code;
-		s->aux2 = st.n_absent << 2 | st.rf_code;
+		s->aux2 = st.n_absent << 10 | st.rf_code << 8 | st.max_cnt;
 	} else {
 		uint64_t max;
 		max = max_streak(es->opt->k, es->bf, s);
@@ -591,7 +600,7 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 				if (!s->comment) {
 					printf("\tec:Z:%d", s->aux&7);
 					if ((s->aux&7) == 0)
-						printf("_%d_%d_%d_%d_%d", s->aux2>>2, s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff, s->aux2&3);
+						printf("_%d:%d_%d_%d:%d_%d", s->aux2>>10, s->aux2&0xff, s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff, s->aux2>>8&3);
 				} else printf("\t%s", s->comment);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
