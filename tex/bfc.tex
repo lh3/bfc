@@ -98,13 +98,23 @@ We modified Algorithm~1 such that missing trusted high-quality $k$-mers incurs
 an extra penalty. This supposedly helps to correct systematic sequencing errors
 which are recurrent but have lower base quality.
 
-To take advantage of multiple CPU cores, we implemented a blocked bloom
-filter~\citep{DBLP:conf/wea/PutzeSS07} with a 1-byte spin lock for every
-63-byte block to prevent concurrent modifications to the same block.  For human
-data, we used an array of 16 million (=$2^{24}$) hash tables to keep $k$-mer
-counts. Each hash table has a spin lock. With a good hash function, locking is
-infrequent. We also put computing and I/O on different threads.  The strategy
-is particularly useful when I/O is slow.
+The $k$-mer size is an important parameter. Longer $k$-mers resolve more
+repeats, while shorter $k$-mers increase $k$-mer depth and thus add power in
+regions with low sequencing coverage. To take advantage of both long and short
+$k$-mers, we implemented a refinement mode. We could apply BFC to the output
+of a previous run and only correct reads that are previously uncorrectable or 
+still contain untrusted $k$-mers after correction. Typically we use a shorter
+$k$-mer in the second round and reject the correction if the corrected read
+contains a $k$-mer with excessively high occurrences or contains more untrusted
+$k$-mers.
+
+%To take advantage of multiple CPU cores, we implemented a blocked bloom
+%filter~\citep{DBLP:conf/wea/PutzeSS07} with a 1-byte spin lock for every
+%63-byte block to prevent concurrent modifications to the same block.  For human
+%data, we used an array of 16 million (=$2^{24}$) hash tables to keep $k$-mer
+%counts. Each hash table has a spin lock. With a good hash function, locking is
+%infrequent. We also put computing and I/O on different threads.  The strategy
+%is particularly useful when I/O is slow.
 
 \begin{algorithm}[ht]
 \DontPrintSemicolon
@@ -167,7 +177,7 @@ raw data  & --  & --    & --    & 2.40M  & 12.4k  & --     & -- \\
 BBMap     & 31  &{\bf 3h22m}&33.0G& 2.78M& 12.4k  & 505k   & 19.2k \\
 BFC-ht    & 37  & 6h33m & 63.5G & 3.04M  & 12.5k  & 830k   & 9.7k \\
 BFC-ht    & 55  & 5h51m & 67.9G & 3.05M  &11.7k& 830k   &{\bf 9.0k}\\
-BFC-ht    &55/33& --    & --    &{\bf 3.08M}&12.5k&{\bf 866k}&10.6k\\
+BFC-ht    &55/33& 9h18m & 67.9G &{\bf 3.07M}&11.8k&{\bf 861k}&9.5k\\
 BFC-bf    & 31  & 7h32m & 23.3G & 3.01M  & 13.1k  & 783k   & 9.2k \\
 BFC-bf    & 55  & 4h41m & 23.3G & 3.05M  &11.8k& 819k   & 11.4k \\
 BLESS     & 31  & 6h31m & 22.3G & 2.91M  & 13.1k  & 674k   & 20.8k \\
@@ -196,24 +206,27 @@ is highlighted in the bold fontface.}
 \end{table}
 
 As is shown in the table, BBMap is the fastest. BFC, BLESS, Bloocoo and Lighter
-are comparable in speed. Bloocoo is the most lightweight. BFC-bf and BLESS,
-which also use disk-based $k$-mer counting and bloom filter like Bloocoo, could
-in principle achieve a similar memory footprint at the cost of speed. We have
-not fully explored all the options. Hash table based implementations, BFC-ht,
-fermi2 and Musket, are most memory hungry as is expected.
-
+are comparable in speed. Bloocoo is the most lightweight. Other bloom filter
+based tools, BFC-bf, BLESS and Lighter, also have a small memory footprint.
 Most evaluated tools have broadly comparable accuracy. Both BFC implementations
 are marginally better, correcting more reads with few overcorrections when a
-similar $k$-mer length is in use. The theoretically better non-greedy algorithm
-could be an explanation to the differences, but subtle implementation details
-could contribute, too. Separating algorithms and implementations is frequently
-hard in evaluations.
+similar $k$-mer length is in use. Two-round correction is even better, though
+it is slower as we have to run BFC-ht twice. We should note that it is possible
+to tune the balance between accuracy, speed and memory for each tool. We have
+not fully explored all the options.
 
-It may appear that using longer $k$-mers for correction is beneficial. This is
-probably because longer $k$-mers resolve more repeat sequences. On this data
-set, KMC2 counted 3.05 billion unique 55-mers occurring twice or more, but only
-2.84 billion 31-mers -- 55-mers could resolve 6.8\% more bases
-[=(3.05-2.84)/3.05]. However, long $k$-mers lead to reduced $k$-mer depth,
+On this data set, KMC2 counted 3.05 billion unique 55-mers occurring twice or
+more, but only 2.84 billion 31-mers, 6.8\% less. This probably explains why
+using longer $k$-mers consistently leads to higher accuracy. However, when
+we ran the fermi 
+
+
+
+When a single $k$-mer size is in use, longer $k$-mers appear better. This is
+probably because longer $k$-mers resolve more repeat sequences.
+
+
+However, long $k$-mers lead to reduced $k$-mer depth,
 which is magnified by the increased chance of having an error on a long $k$-mer.
 The reduced depth especially in low-coverage regions may affect the contiguity
 of an assembly. We ran the fermi2 assembler~\citep{Li:2012fk} on the 37-mer
