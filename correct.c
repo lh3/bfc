@@ -12,15 +12,15 @@
 #include "kvec.h"
 
 typedef struct { // NOTE: unaligned memory
-	uint8_t b:3, ob:3, q:1, oq:1;
-	uint8_t ec:1, absent:1, dummy6:6;
-	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, conflict:1, dummy:1;
+	uint8_t b:3, q:1, ob:3, oq:1;
+	uint8_t dummy;
+	uint16_t lcov:6, hcov:6, solid_end:1, high_end:1, ec:1, absent:1;
 	int i;
 } ecbase_t;
 
 typedef kvec_t(ecbase_t) ecseq_t;
 
-static int bfc_seq_conv(const char *s, const char *q, int qthres, ecseq_t *seq)
+static int bfc_seq_conv(const char *s, const char *q, int qthres, ecseq_t *seq, int b_from_q)
 {
 	int i, l;
 	l = strlen(s);
@@ -28,7 +28,7 @@ static int bfc_seq_conv(const char *s, const char *q, int qthres, ecseq_t *seq)
 	seq->n = l;
 	for (i = 0; i < l; ++i) {
 		ecbase_t *c = &seq->a[i];
-		c->b = c->ob = seq_nt6_table[(int)s[i]] - 1;
+		c->b = c->ob = b_from_q && q && q[i] - 33 <= 5? q[i] - 34 : seq_nt6_table[(int)s[i]] - 1
 		c->q = c->oq = !q? 1 : q[i] - 33 >= qthres? 1 : 0;
 		if (c->b > 3) c->q = c->oq = 0;
 		c->i = i;
@@ -393,7 +393,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 
 	s.ec_code = ECCODE_MISC, s.brute = 0, s.n_ec = s.n_ec_high = 0, s.n_absent = s.max_cnt = 0;
 	s.rf_code = e->opt->refine_ec? 1 : 0;
-	bfc_seq_conv(seq, qual, e->opt->q, &e->seq);
+	bfc_seq_conv(seq, qual, e->opt->q, &e->seq, e->opt->refine_ec);
 	for (i = 0; i < e->seq.n; ++i)
 		if (e->seq.a[i].ob > 3) ++n_n;
 	if (n_n > e->seq.n * .05) {
@@ -446,7 +446,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			c->b = e->ec[0].a[i].b > 3? e->seq.a[i].b : e->ec[0].a[i].b;
 		else if (e->ec[1].a[i].b > 3) c->b = e->ec[0].a[i].b;
 		else if (e->ec[0].a[i].b > 3) c->b = e->ec[1].a[i].b;
-		else c->b = e->seq.a[i].ob, c->conflict = 1;
+		else c->b = e->seq.a[i].ob;
 	}
 	for (i = 0; i < e->seq.n; ++i) {
 		int is_diff = !(e->seq.a[i].b == e->seq.a[i].ob);
@@ -455,7 +455,7 @@ ecstat_t bfc_ec1(bfc_ec1buf_t *e, char *seq, char *qual)
 			if (e->seq.a[i].q) ++s.n_ec_high;
 		}
 		seq[i] = (is_diff? "acgtn" : "ACGTN")[e->seq.a[i].b];
-		if (qual) qual[i] = is_diff? '+' : "+?"[e->seq.a[i].q];
+		if (qual) qual[i] = is_diff? 34 + e->seq.a[i].ob : "+?"[e->seq.a[i].q];
 	}
 	if (bfc_verbose >= 4) {
 		bfc_ec_kcov(e->opt->k, e->opt->min_cov, &e->seq, e->ch);
