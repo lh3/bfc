@@ -19,10 +19,10 @@ with GNU time.
 
 
 ```sh
-# BBMap-34.38 (using ecclimit=14 made little difference)
+# BBMap-34.38 (adding ecclimit=14 made little difference)
 ecc.sh -Xmx32g in=read1.fastq.gz in2=read2.fastq.gz out=ec.fq tmpdir=tmp threads=16 ecc=t aec=t k=31
 
-# BFC-r155
+# BFC-r175
 bash -c "bfc -s 3g -k55 -t 16 <(seqtk mergepe read1.fq.gz read2.fq.gz) <(seqtk mergepe read1.fq.gz read2.fq.gz) | gzip -1 > ec.fq.gz"
 
 # BFC-kmc
@@ -34,7 +34,7 @@ seqtk mergepe read1.fq.gz read2.fq.gz | bfc-kmc -t16 reads.k55 | gzip -1 > ec.fq
 bless -read1 read1.fq -read2 read2.fq -kmerlength 55 -prefix out -smpthread 16 -max_mem 24 -notrim
 
 # Bloocoo-1.0.4
-Bloocoo -nb-cores 16 -file read12.fq -kmer-size 31
+Bloocoo -nb-cores 16 -file read12.fq.gz -kmer-size 31
 
 # Fermi2-r175; ropebwt2-r187
 seqtk mergepe read1.fq.gz read2.fq.gz | ropebwt2 -drq20 -x31 > index.fmd
@@ -43,7 +43,7 @@ seqtk mergepe read1.fq.gz read2.fq.gz | fermi2 correct -t 16 -k 29 index.fmd /de
 # Fiona-0.2.0 (killed due to large memory footprint)
 fiona -g 3000000000 --sequencing-technology illumina --no-final-trim-ns -nt 16 read12.fq ec.fq
 
-# Lighter-20140123
+# Lighter-20150123
 lighter -K 31 3000000000 -r read1.fq.gz -r read2.fq.gz -t 16
 
 # QuorUM-1.0.0
@@ -65,7 +65,11 @@ trowel -t 16 -f list.txt -k 31 -ntr
    2014][review]), and did not work with unequal read lengths. More recent
    versions are much better.
 
-2. In addition to tools shown in the table, we have also tried
+2. Lighter-1.0.4 is slow on gzip'd input, so I raised issues [#13][i13] and
+   [#14][i14]. The version checked out on 2015-01-23 and compiled with
+   the latest zlib is much more performant on gzip'd input.
+
+3. In addition to tools shown in the table, we have also tried
    [Trowel-0.1.4.1][trowel], [Fiona-0.2.0][fiona] and
    [AllPathsLG-51828][allpath]. They were taking over 110GB RAM and got
    manually killed. [Coral][coral], [HiTEC][hitec] and [SHREC][shrec] are
@@ -84,3 +88,5 @@ trowel -t 16 -f list.txt -k 31 -ntr
 [coral]: http://www.cs.helsinki.fi/u/lmsalmel/coral/
 [hitec]: http://www.csd.uwo.ca/~ilie/HiTEC/
 [shrec]: https://sourceforge.net/projects/shrec-ec/
+[i13]: https://github.com/mourisl/Lighter/issues/13
+[i14]: https://github.com/mourisl/Lighter/issues/14
