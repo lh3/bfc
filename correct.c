@@ -235,11 +235,12 @@ static int buf_backtrack(ecstack1_t *s, int end, const ecseq_t *seq, ecseq_t *pa
 	kv_resize(ecbase_t, *path, seq->n);
 	path->n = seq->n;
 	while (end >= 0) {
-		i = s[end].i;
-		path->a[i].b = s[end].b;
-		path->a[i].ec = s[end].pen.ec;
-		path->a[i].absent = s[end].pen.absent;
-		n_absent += s[end].pen.absent;
+		if ((i = s[end].i) < seq->n) {
+			path->a[i].b = s[end].b;
+			path->a[i].ec = s[end].pen.ec;
+			path->a[i].absent = s[end].pen.absent;
+			n_absent += s[end].pen.absent;
+		}
 		end = s[end].parent;
 	}
 	return n_absent;
