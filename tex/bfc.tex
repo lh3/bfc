@@ -108,7 +108,7 @@ the base and $(i-1,a)$ inserts a base $a$ before $i$. We have not
 implemented this INDEL-aware algorithm because such
 errors are rare in Illumina data.
 
-The worse-case time complexity of Algorithm~1 is exponential in the length of
+The worst-case time complexity of Algorithm~1 is exponential in the length of
 the read. In implementation, we use a heuristic to reduce the search space by
 skipping line~4 if the base quality is 20 or higher (Q20) and the $k$-mer
 ending at it is trusted, or if five bases or two Q20 bases have been corrected
@@ -189,11 +189,12 @@ fewer) identical bases to the reference genome than the best alignment of the
 original sequence. The table gives $k$-mer size (maximal size used for Bloocoo,
 fermi2, Lighter and Musket), the wall-clock \emph{time} when 16 threads are
 specified if possible, the peak \emph{RAM} measured by GNU time, number of
-corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads,
+corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads (i.e. reads with parts mapped to different places),
 number of corrected reads becoming \emph{better} and the number of reads
 becoming \emph{worse} than the original reads. For each metric, the best tool
-is highlighted in the bold fontface.}
-\end{table}
+is highlighted in the bold fontface. Metrics in the table are complement to
+each other. A tool that tends to correct a few but not all errors may lead to more
+`better' reads but fewer `perfect' mapping.}  \end{table}
 
 As is shown in the table, BBMap is the fastest. BFC, BLESS, Bloocoo and Lighter
 are comparable in speed. Bloocoo is the most lightweight. Other bloom filter
