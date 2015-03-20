@@ -61,3 +61,19 @@ int bfc_bf_get(const bfc_bf_t *b, uint64_t hash)
 	}
 	return cnt;
 }
+
+static inline uint64_t popcount64(uint64_t y) // standard popcount; from wikipedia
+{
+	y -= ((y >> 1) & 0x5555555555555555ull);
+	y = (y & 0x3333333333333333ull) + (y >> 2 & 0x3333333333333333ull);
+	return ((y + (y >> 4)) & 0xf0f0f0f0f0f0f0full) * 0x101010101010101ull >> 56;
+}
+
+uint64_t bfc_bf_load(const bfc_bf_t *b)
+{
+	uint64_t n = 0, i, size = b->n_shift-3-3;
+	uint64_t *p = (uint64_t*)b->b;
+	for (i = 0; i < size; ++i)
+		n += popcount64(p[i]);
+	return n;
+}

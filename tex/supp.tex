@@ -1,0 +1,86 @@
+\documentclass{bioinfo2}
+
+\copyrightyear{2015}
+\pubyear{2015}
+
+\usepackage{amsmath}
+\usepackage{natbib}
+
+\bibliographystyle{apalike}
+
+\begin{document}
+\firstpage{1}
+
+\title[Error Correction for Illumina Data]{BFC: correcting Illumina sequencing errors (supplementary information)}
+\author[Li]{Heng Li}
+\address{Broad Institute, 75 Ames Street, Cambridge, MA 02142, USA}
+\maketitle
+
+\section{Supplementary Information}
+
+\subsection{Effect on {\it de novo} assembly}
+
+We downloaded {\it E. coli} reads (AC:ERR022075) and extracted first one
+million read pairs that do not contain any ambiguous bases. We ran each error
+corrector with 23-mers and then {\it de novo} assembled the corrected reads
+with Velvet~\citep{Zerbino:2008uq} as single-end reads and with
+ABySS~\citep{Simpson:2009ys} as paired-end reads. For both assemblers, the
+$k$-mer length was set to 51. Table~1 shows the mapped N50 and the number of
+mismatches/INDELs between Velvet contigs and the reference genome.  Note that
+for ABySS, we broke scaffolds at ambiguous bases to derive contigs. Such
+contigs are sometimes called `scaftigs`. They are often longer than typical
+contigs.
+
+\begin{table}[b]
+\processtable{Effect on {\it de novo} assembly}
+{\footnotesize
+\begin{tabular}{p{1.5cm}p{1.3cm}p{1.3cm}p{1.3cm}p{1.3cm}}
+\toprule
+Program   & Velvet contig N50 & Velvet mismatches & ABySS contig N50 & ABySS scaff N50 \\
+\midrule
+raw data  & 30299 & 23 & 58800 & 101253 \\
+BBMap     & 34674 & 25 & 58462 & 89313 \\
+BFC-bf    & 35876 & 32 & 87534 & 101253 \\
+BFC-ht    & 40093 & 24 & 87534 & 101253 \\
+BLESS     & 36253 & 29 & 59793 & 101120 \\
+Bloocoo   & 31463 & 41 & 88102 & 102602 \\
+Fermi2    & 40150 & 22 & 79900 & 89317 \\
+Lighter   & 36312 & 28 & 63934 & 89313 \\
+Musket    & 35148 & 50 & 59795 & 88102 \\
+SGA       & 29714 & 28 & 65314 & 101253 \\
+\botrule
+\end{tabular}}{}
+\end{table}
+
+\subsection{Other error correction tools}
+
+In addition to the error correctors evaluated in the manuscript, we have also
+tried AllPaths-LG~\citep{Gnerre:2011ys}, Fiona~\citep{Schulz:2014aa} and
+Trowel~\citep{Lim:2014aa}, but they require more than 128GB RAM our machine
+has, so were not evaluated. According to \citet{Molnar:2014aa},
+RACER~\citep{Ilie:2013aa} uses 1.38--2.36 bytes per input base for
+high-coverage human data. It would also use too much memory.  In the Blue
+paper~\citep{Greenfield:2014aa}, Blue uses 2.6GB RAM for chr21 data, less than
+2\% of the human genome. At this rate, 128GB RAM would not be sufficient,
+either. We have also considered, QuorUM~\citep{Zimin:2013aa}.  However,
+it always trims reads, making it hard to be compared to others which keep
+full-length reads.
+
+%\subsection{Potential concerns with greedy algorithms}
+%
+%If a greedy correction algorithm decides to keep or change a read base, it does
+%not revert the decision at a later step. This may lead to suboptimal
+%correction. For example, suppose we have a 150bp read, on which the first 80bp
+%falls in a segmental duplication and there is one A-to-G sequencing error at
+%the position 75. If a copy of the duplication happens to have a `G' base at
+%the same position, the first 80bp of this read will appear to be error-free
+%although there is in fact an error. A greedy error corrector will usually
+%trust the error and then see multiple errors in the last 70bp of the read.
+%This leads to false corrections or failed correction.
+%
+%The scenario should happen rarely. However, it is still a theoretical concern
+%and given the repeat-rich human genome, it is not obvious how often it happens
+%in practice. This motivated us to implement a non-greedy algorithm in BFC.
+
+\bibliography{bfc}
+\end{document}

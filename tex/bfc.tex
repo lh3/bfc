@@ -15,7 +15,7 @@
 \begin{document}
 \firstpage{1}
 
-\title[Error Correction for Illumina Data]{Correcting Illumina sequencing errors for human data}
+\title[Error Correction for Illumina Data]{BFC: correcting Illumina sequencing errors}
 
 \author[Li]{Heng Li}
 
@@ -29,8 +29,7 @@
 \section{Summary:} We present a new tool to correct sequencing errors in
 Illumina data produced from high-coverage whole-genome shotgun resequencing. It
 uses a non-greedy algorithm and shows comparable performance and higher
-accuracy in an evaluation on real human data. This evaluation has the most
-complete collection of high-performance error correctors so far.
+accuracy in an evaluation on real human data.
 
 \section{Availability and implementation:} https://github.com/lh3/bfc
 
@@ -153,11 +152,7 @@ data (Table~1). We ran the tools on a Linux server with 20 cores of Intel
 E5-2660 CPUs and 128GB RAM. Precompiled binaries are available through
 http://bit.ly/biobin and the command lines were included in the BFC source code
 package (http://bit.ly/bfc-eval).  Notably, BLESS only works with uncompressed
-files. The rest of tools were provided with gzip'd files as input. We have also
-tried AllPaths-LG~\citep{Gnerre:2011ys}, Fiona~\citep{Schulz:2014aa} and
-Trowel~\citep{Lim:2014aa}, but they require more RAM than our machine.
-QuorUM-1.0.0~\citep{Zimin:2013aa} always trims reads, making it hard to be
-compared to others which keep full-length reads.
+files. The rest of tools were provided with gzip'd files as input.
 
 \begin{table}[t]
 \processtable{Performance of error correction}
@@ -183,7 +178,7 @@ Lighter   & 31  & 5h12m & 13.4G & 2.98M  & 13.0k  & 756k   & 30.1k  \\
 Musket    & 27  &21h33m & 77.5G & 2.94M  & 22.5k  & 790k   & 36.3k  \\
 SGA       & 55  &48h40m & 35.6G & 3.01M  & 12.1k  & 755k   & 12.8k  \\
 \botrule
-\end{tabular}}{4.45 million pairs of $\sim$150bp reads were downloaded from
+\end{tabular}}{445 million pairs of $\sim$150bp reads were downloaded from
 BaseSpace, under the sample ``NA12878-L7'' of project ``HiSeq X Ten: TruSeq
 Nano (4 replicates of NA12878)'', and were corrected together. On a subset of
 two million randomly sampled read pairs, the original and the corrected
