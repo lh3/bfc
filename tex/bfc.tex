@@ -29,7 +29,7 @@
 \section{Summary:} We present a new tool to correct sequencing errors in
 Illumina data produced from high-coverage whole-genome shotgun resequencing. It
 uses a non-greedy algorithm and shows comparable performance and higher
-accuracy in an evaluation on real human data.
+accuracy in evaluations on real data.
 
 \section{Availability and implementation:} https://github.com/lh3/bfc
 
@@ -43,7 +43,7 @@ by using other overlapping reads that do not contain the errors. Many \emph{de
 novo} assemblers, in particular short-read assemblers for large genomes, use
 error correction to reduce the complexity of the assembly graph such that the
 graph can be fitted to limited RAM. Error correction was first expressed
-as the \emph{spectrum alignment problem}~\citep{Pevzner:2001vn}, whereby we take
+as the \emph{spectral alignment problem}~\citep{Pevzner:2001vn}, whereby we take
 a set of trusted $k$-mers and attempt to find a sequence with minimal
 corrections such that each $k$-mer on the corrected sequence is trusted.
 The majority of error correctors are based on this idea and take a greedy
@@ -51,8 +51,8 @@ approach to solving this problem.  They make a correction based on the local
 sequence context and do not revert the decision. They may not find the sequence
 with the minimal corrections. We worried that the greedy strategy might affect
 the accuracy given reads from a repeat-rich diploid genome, so derived a new
-algorithm. It is optimal provided that we know there is an error-free $k$-mer
-in the read.
+algorithm. It is able to find the sequence with minimal corrections provided
+that we know there is an error-free $k$-mer in the read.
 
 \begin{methods}
 \section{Methods}
@@ -66,7 +66,10 @@ it retrieves the state $(i,W,\mathcal{C},p)$ with the lowest penalty $p$ (line~1
 adds a new state $(i+1,W[1,k-2]\circ a,\mathcal{C}',p')$ if $a$ is the read
 base or $W\circ a$ is a trusted $k$-mer. If the first $k$-mer in $S$ is
 error free and we disallow untrusted $k$-mers by removing line~3, this
-algorithm finds the optimal solution to the spectrum alignment problem.
+algorithm finds the optimal solution to the spectral alignment problem.
+\citet{Chaisson:2004kx} have described a more general non-greedy algorithm.
+Its strict form is not implementable in practice. The heuristic adaptation
+is loosely similar to ours without line~3.
 
 \begin{algorithm}[ht]
 \DontPrintSemicolon
@@ -100,7 +103,7 @@ algorithm finds the optimal solution to the spectrum alignment problem.
 \caption{Error correction for one string in one direction}
 \end{algorithm}
 
-It is possible to modify the algorithm to correct insertion and deletion
+It is possible to modify Algorithm~1 to correct insertion and deletion
 errors (INDELs) by augmenting the set of the ``next bases'' at line~2 to:
 $$\mathcal{N}=\{(j,a)|j\in\{i-1,i\},a\in\{{\rm A},{\rm C},{\rm G},{\rm T}\}\}\cup\{(i,\epsilon)\}$$
 In this set, $(i,a)$ substitutes a base at position $i$, $(i,\epsilon)$ deletes
@@ -112,8 +115,8 @@ The worst-case time complexity of Algorithm~1 is exponential in the length of
 the read. In implementation, we use a heuristic to reduce the search space by
 skipping line~4 if the base quality is 20 or higher (Q20) and the $k$-mer
 ending at it is trusted, or if five bases or two Q20 bases have been corrected
-in the last 10bp window. If BFC still takes too many iterations before finding
-an optimal solution, it stops the search and marks the read uncorrectable.
+in the last 10bp window. If function {\sc CorrectErrors} still takes too
+many iterations before returning, it stops the search and claims the read uncorrectable.
 
 Given a read, BFC finds the longest substring on which each $k$-mer is trusted. It
 then extends the substring to both ends of the read with Algorithm~1. If a read
@@ -144,15 +147,18 @@ which are recurrent but have lower base quality.
 
 \section{Results and Discussions}
 
-We evaluated BFC along with BBMap-34.38 (\mbox{http://bit.ly/bbMap}),
+We evaluated BFC along with
 BLESS-v0p23~\citep{Heo:2014aa}, Bloocoo-1.0.4~\citep{Drezen:2014aa},
 fermi2-r175~\citep{Li:2012fk}, Lighter-20150123~\citep{Song:2014aa},
-Musket-1.1~\citep{Liu:2013ac} and SGA-0.9.13~\citep{Simpson:2012aa} on real
-data (Table~1). We ran the tools on a Linux server with 20 cores of Intel
+Musket-1.1~\citep{Liu:2013ac} and SGA-0.9.13~\citep{Simpson:2012aa}.
+We ran the tools on a Linux server with 20 cores of Intel
 E5-2660 CPUs and 128GB RAM. Precompiled binaries are available through
-http://bit.ly/biobin and the command lines were included in the BFC source code
-package (http://bit.ly/bfc-eval).  Notably, BLESS only works with uncompressed
-files. The rest of tools were provided with gzip'd files as input.
+http://bit.ly/biobin and the command lines were shown in Table~S1.
+Notably, BLESS only works with uncompressed files. Other tools were
+provided with gzip'd FASTQ.
+%The rest of tools were provided with gzip'd files as input.
+%We have considered a few other tools but have not included them for various
+%reasons (see Supplementary Notes).
 
 \begin{table}[t]
 \processtable{Performance of error correction}
@@ -162,14 +168,14 @@ files. The rest of tools were provided with gzip'd files as input.
 Prog.     & $k$ & Time  & RAM   & Perfect&Chim.& Better & Worse \\
 \midrule
 raw data  & --  & --    & --    & 2.40M  & 12.4k  & --     & -- \\
-BBMap     & 31  &{\bf 3h22m}&33.0G& 2.78M& 12.4k  & 505k   & 19.2k \\
+%BBMap     & 31  &{\bf 3h22m}&33.0G& 2.78M& 12.4k  & 505k   & 19.2k \\
 %BFC-ht    & 37  & 6h33m & 63.5G & 3.04M  & 12.5k  & 830k   & 9.7k \\
-BFC-ht    & 31  & 7h15m & 83.5G & 3.03M  &13.6k   & 816k   & 10.8k \\
 %BFC-ht    & 33  & 6h15m & 61.4G & 3.03M  &13.2k& 822k   & 10.1k \\
-BFC-ht    & 55  & 5h51m & 67.9G &{\bf 3.05M}&11.7k& 830k   &{\bf 9.0k}\\
 %BFC-ht    &55/33& 9h18m & 67.9G &{\bf 3.07M}&11.8k&{\bf 861k}&9.5k\\
 BFC-bf    & 31  & 7h32m & 23.3G & 3.01M  & 13.1k  & 783k   & 9.2k \\
-BFC-bf    & 55  & 4h41m & 23.3G &{\bf 3.05M}&11.8k& 819k   & 11.4k \\
+BFC-bf    & 55&{\bf 4h41m}&23.3G&{\bf 3.05M}&11.8k& 819k   & 11.4k \\
+BFC-ht    & 31  & 7h15m & 83.5G & 3.03M  &13.6k   & 816k   & 10.8k \\
+BFC-ht    & 55  & 5h51m & 67.9G &{\bf 3.05M}&11.7k& 830k   &{\bf 9.0k}\\
 BLESS     & 31  & 6h31m & 22.3G & 2.91M  & 13.1k  & 674k   & 20.8k \\
 BLESS     & 55  & 5h09m & 22.3G & 3.01M  &{\bf 11.5k}& 775k& 10.3k \\
 Bloocoo   & 31  & 5h52m &{\bf 4.0G}&2.88M& 14.1k  & 764k   & 31.5k  \\
@@ -192,38 +198,89 @@ specified if possible, the peak \emph{RAM} measured by GNU time, number of
 corrected reads mapped \emph{perfectly}, number of \emph{chimeric} reads (i.e. reads with parts mapped to different places),
 number of corrected reads becoming \emph{better} and the number of reads
 becoming \emph{worse} than the original reads. For each metric, the best tool
-is highlighted in the bold fontface. Metrics in the table are complement to
-each other. A tool that tends to correct a few but not all errors may lead to more
-`better' reads but fewer `perfect' mapping.}  \end{table}
+is highlighted in the bold fontface.}
+%Metrics in the table are complement to
+%each other. A tool that tends to correct a few but not all errors may lead to more
+%`better' reads but fewer `perfect' mapping.
+\end{table}
 
-As is shown in the table, BBMap is the fastest. BFC, BLESS, Bloocoo and Lighter
-are comparable in speed. Bloocoo is the most lightweight. Other bloom filter
-based tools, BFC-bf, BLESS and Lighter, also have a small memory footprint.
-Most evaluated tools have broadly similar accuracy.  BFC-ht is more accurate
-than BFC-bf overall, suggesting retaining high-quality $k$-mers helps error
-correction; both BFC implementations are marginally better in this evaluaton,
-correcting more reads with fewer or comparable overcorrections when a similar
-$k$-mer length is in use, which potentially demonstrates that a non-greedy
-algorithm might work better, though subtle differences in heuristics and hidden
-thresholds between the tools could also play a role.  We should note that it is
-possible to tune the balance between accuracy, speed and memory for each tool.
-We have not fully explored all the options.
+\begin{table}[b]
+\processtable{Effect on {\it de novo} assembly}
+{\footnotesize
+\begin{tabular}{p{1.0cm}p{1.3cm}p{1.9cm}p{1.5cm}p{1.2cm}}
+\toprule
+Program   & Scaffold NG50 (kb) & Contig aligned-N50 (kb) & Alignment break points & Potential FP SNP\\
+\midrule
+raw data  & 31.6 / 29.9 & 14.8 / 20.2 / 4.9 & 352 / 157 / 29 & 1568 / 334\\
+BFC-bf    & 33.7 / 33.7 & 17.3 / 22.8 / 7.6 & 341 / 173 / 33 & 3334 / 668\\
+BFC-ht    & 34.8 / 34.2 & 17.3 / 22.9 / 9.1 & 314 / 176 / 31 & 1397 / 374\\
+BLESS     & 33.6 / 31.7 & 15.4 / 20.7 / 8.0 & 351 / 165 / 28 & 1744 / 414\\
+Bloocoo   & 34.5 / 33.7 & 17.1 / 22.6 / 6.2 & 340 / 177 / 32 & 3128 / 480\\
+Fermi2    & 33.8 / 33.7 & 16.8 / 22.6 / 8.9 & 333 / 174 / 32 & 1444 / 396\\
+Lighter   & 34.6 / 33.6 & 16.6 / 22.4 / 7.9 & 329 / 180 / 34 & 3011 / 651\\
+Musket    & 33.4 / 32.2 & 16.0 / 21.2 / 8.2 & 338 / 181 / 30 & 1940 / 617\\
+SGA       & 34.4 / 33.4 & 16.7 / 22.4 / 6.6 & 360 / 163 / 32 & 3107 / 495\\
+\botrule
+\end{tabular}}{33.8 million pairs of 100bp {\it C. elegans} reads were
+downloaded from SRA under accession SRR065390, corrected using $k$-mer length
+23 and then assembled with Velvet-1.2.10~(\citealp{Zerbino:2008uq}; velvetg
+option `\mbox{-exp\_cov} auto \mbox{-cov\_cutoff} auto \mbox{-ins\_length} 250'
+with $k$-mer length 61), ABySS-1.5.2~[\citealp{Simpson:2009ys}; abyess-pe
+option `k=67 q=0 s=500 n=5' taken from~\citet{Simpson:2012aa}] and fermikit-0.9
+(fermi2.pl option \mbox{`-Es100m'}). For Velvet and ABySS, contigs were derived
+by splitting scaffolds at contiguous `N' bases longer than 5bp. In the table,
+each row gives the NG50 of Velvet/ABySS scaffolds longer than 200bp, the
+aligned N50 of Velvet/ABySS/fermikit contigs longer than 200bp, the number of
+contig alignment break points with $>$200bp flanking sequences and the number
+of false positive unfiltered/filtered fermikit SNPs as compared to
+freebayes-0.9.20 calls~(\citealp{Garrison:2012aa}; option
+`\mbox{--experimental-gls}'). BFC and fermi2 were tuned to work with fermikit
+for human variant calling before this evaluation while others not.}
+\end{table}
 
-In the table, error correctors appear to be faster and more accurate when
-longer $k$-mers are in use. A possible explanation is that longer $k$-mers
-resolve more repeat sequences and also reduce the search space. However, when
-we use BFC-ht to correct errors in this dataset, fermi2~\citep{Li:2012fk}
-derived longer contigs and better variant calls with shorter $k$-mers. We
-speculate that this observation is caused by reduced $k$-mer coverage firstly
-because there are fewer long $k$-mers on each read and secondly because longer
-$k$-mers are more likely to harbor errors. The reduced $k$-mer coverage makes
-it harder to correct errors in regions with low coverage and thus increases the
-chance of breaking contigs.  To take advantage of both shorter and longer
-$k$-mers, we have also tried a two-round correction strategy with two $k$-mer
-sizes. The strategy leads to better numbers in the table (861k reads corrected
-to be better and 9.5k worse) at the cost of speed, but does not greatly improve
-the assembly. We will focus on understanding the interaction between error
-correctors and assemblers in future works.
+On human data (Table~1), BFC has similar performance to other error correctors
+that use greedy algorithms. It tends to correct more errors without introducing
+new errors, potentially due to its non-greedy and quality-aware algorithm.
+
+BFC also works well with assemblers (Table~2). It should be noted
+that the short reads were sequenced from the Bristol N2 strain, the same as the
+{\it C. elegans} reference genome. We expect to see few alignment break points
+and base-level differences. Extended discussions on the results can be found in
+Supplementary Notes.
+
+%As is shown in the table, BBMap is the fastest. BFC, BLESS, Bloocoo and Lighter
+%are comparable in speed. Bloocoo is the most lightweight. Other bloom filter
+%based tools, BFC-bf, BLESS and Lighter, also have a small memory footprint.
+%
+%To evaluate accuracy, we counted the number of perfect mappings and compared
+%each read before and after correction. Although for an individual read we
+%cannot assert that better mapping always implies better correction, 
+%the total counts from millions of reads are good indicators of accuracy.
+%In our evaluation, most tools have broadly similar accuracy.  BFC-ht is more accurate
+%than BFC-bf overall, suggesting retaining high-quality $k$-mers helps error
+%correction; both BFC implementations are marginally better in this evaluaton,
+%correcting more reads with fewer or comparable overcorrections when a similar
+%$k$-mer length is in use, which potentially demonstrates that a non-greedy
+%algorithm might work better, though subtle differences in heuristics and hidden
+%thresholds between the tools could also play a role.  We should note that it is
+%possible to tune the balance between accuracy, speed and memory for each tool.
+%We have not fully explored all the options.
+%
+%In the table, error correctors appear to be faster and more accurate when
+%longer $k$-mers are in use. A possible explanation is that longer $k$-mers
+%resolve more repeat sequences and also reduce the search space. However, when
+%we use BFC-ht to correct errors in this dataset, fermi2~\citep{Li:2012fk}
+%derived longer contigs and better variant calls with shorter $k$-mers. We
+%speculate that this observation is caused by reduced $k$-mer coverage firstly
+%because there are fewer long $k$-mers on each read and secondly because longer
+%$k$-mers are more likely to harbor errors. The reduced $k$-mer coverage makes
+%it harder to correct errors in regions with low coverage and thus increases the
+%chance of breaking contigs.  To take advantage of both shorter and longer
+%$k$-mers, we have also tried a two-round correction strategy with two $k$-mer
+%sizes. The strategy leads to better numbers in the table (861k reads corrected
+%to be better and 9.5k worse) at the cost of speed, but does not greatly improve
+%the assembly. We will focus on understanding the interaction between error
+%correctors and assemblers in future works.
 
 
 \section*{Acknowledgement}

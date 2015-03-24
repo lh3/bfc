@@ -6,51 +6,23 @@
 \usepackage{amsmath}
 \usepackage{natbib}
 
+\newcommand{\specialcell}[2][c]{%
+  \begin{tabular}[#1]{@{}l@{}}#2\end{tabular}}
+
+\usepackage{caption}
+\renewcommand{\thetable}{S\arabic{table}}
+
 \bibliographystyle{apalike}
 
 \begin{document}
 \firstpage{1}
 
-\title[Error Correction for Illumina Data]{BFC: correcting Illumina sequencing errors (supplementary information)}
+\title[Error Correction for Illumina Data]{BFC: correcting Illumina sequencing errors (supplementary notes)}
 \author[Li]{Heng Li}
 \address{Broad Institute, 75 Ames Street, Cambridge, MA 02142, USA}
 \maketitle
 
-\section{Supplementary Information}
-
-\subsection{Effect on {\it de novo} assembly}
-
-We downloaded {\it E. coli} reads (AC:ERR022075) and extracted first one
-million read pairs that do not contain any ambiguous bases. We ran each error
-corrector with 23-mers and then {\it de novo} assembled the corrected reads
-with Velvet~\citep{Zerbino:2008uq} as single-end reads and with
-ABySS~\citep{Simpson:2009ys} as paired-end reads. For both assemblers, the
-$k$-mer length was set to 51. Table~1 shows the mapped N50 and the number of
-mismatches/INDELs between Velvet contigs and the reference genome.  Note that
-for ABySS, we broke scaffolds at ambiguous bases to derive contigs. Such
-contigs are sometimes called `scaftigs`. They are often longer than typical
-contigs.
-
-\begin{table}[b]
-\processtable{Effect on {\it de novo} assembly}
-{\footnotesize
-\begin{tabular}{p{1.5cm}p{1.3cm}p{1.3cm}p{1.3cm}p{1.3cm}}
-\toprule
-Program   & Velvet contig N50 & Velvet mismatches & ABySS contig N50 & ABySS scaff N50 \\
-\midrule
-raw data  & 30299 & 23 & 58800 & 101253 \\
-BBMap     & 34674 & 25 & 58462 & 89313 \\
-BFC-bf    & 35876 & 32 & 87534 & 101253 \\
-BFC-ht    & 40093 & 24 & 87534 & 101253 \\
-BLESS     & 36253 & 29 & 59793 & 101120 \\
-Bloocoo   & 31463 & 41 & 88102 & 102602 \\
-Fermi2    & 40150 & 22 & 79900 & 89317 \\
-Lighter   & 36312 & 28 & 63934 & 89313 \\
-Musket    & 35148 & 50 & 59795 & 88102 \\
-SGA       & 29714 & 28 & 65314 & 101253 \\
-\botrule
-\end{tabular}}{}
-\end{table}
+\section{Supplementary Notes}
 
 \subsection{Other error correction tools}
 
@@ -66,21 +38,135 @@ either. We have also considered, QuorUM~\citep{Zimin:2013aa}.  However,
 it always trims reads, making it hard to be compared to others which keep
 full-length reads.
 
-%\subsection{Potential concerns with greedy algorithms}
-%
-%If a greedy correction algorithm decides to keep or change a read base, it does
-%not revert the decision at a later step. This may lead to suboptimal
-%correction. For example, suppose we have a 150bp read, on which the first 80bp
-%falls in a segmental duplication and there is one A-to-G sequencing error at
-%the position 75. If a copy of the duplication happens to have a `G' base at
-%the same position, the first 80bp of this read will appear to be error-free
-%although there is in fact an error. A greedy error corrector will usually
-%trust the error and then see multiple errors in the last 70bp of the read.
-%This leads to false corrections or failed correction.
-%
-%The scenario should happen rarely. However, it is still a theoretical concern
-%and given the repeat-rich human genome, it is not obvious how often it happens
-%in practice. This motivated us to implement a non-greedy algorithm in BFC.
+\subsection{Mapping-based metrics}
 
+In Illumina sequencing, a small fraction of reads may harbor many errors. They
+pose a great challenge to error correctors. They may significantly increase
+the number of unmapped reads and inflate number of uncorrected base errors.
+However, in practice, it is usually safe to ignore these reads. There are at
+times enough high-quality reads in the same region. To reduce the effect
+of these low-quality reads, we measured the accuracy based on read counts
+rather than base counts.
+
+For the human data, a concern with mapping-based metrics is that sample NA12878
+is different from the human reference genome, which might lead to reference
+bias. We think this concern is minor because reads were corrected with no
+information about the reference. Although given an individual read we cannot say
+the corrected read with fewer mismatches to the reference is always better, given
+millions of reads, a better corrector should yield fewer mismatches overall.
+Mapping-based metrics are valid and appealing due to the simple ascertainment
+procedure.
+
+\subsection{Error correction for {\it C. elegans} reads}
+
+We have tried 23-mer and 27-mer for error correction. The N50 of assembled
+scaffolds and contigs are mostly within a few hundred bp with 23-mer
+slightly better. The rest of assembly based metrics were all calculated
+for the correction with 23-mers. Detailed command lines are shown in Table~S1.
+
+\begin{table*}[t]
+\processtable{Command lines used for assembly evaluation}
+{\footnotesize
+\begin{tabular}{lp{13.2cm}}
+\toprule
+Functionality   & Command line \\
+\midrule
+BFC-bf-r157 correction & \specialcell[t]{\tt kmc -k23 -t8 SRR065390.fq SRR065390.kmc kmc-tmp\\\tt bfc-kmc -t8 SRR065390.kmc SRR065390.raw.fq} \\
+BFC-ht-r175 correction & {\tt bfc -t8 -s 100m -k 23 SRR065390.fq} \\
+BLESS-v0p23 correction & {\tt bless -read SRR065390.fq -kmerlength 23 -prefix out -smpthread 8 -notrim} \\
+Bloocoo-1.0.4 correction & {\tt Bloocoo -nb-cores 8 -file SRR065390.fq -kmer-size 23 -out out} \\
+Fermi2-r175 correction & \specialcell[t]{\tt ropebwt2 -drq20 -x31 SRR065390.raw.fq \char62\,SRR065390.fmd\\\tt fermi2 correct -t8 -k23 SRR065390.fmd SRR065390.fq} \\
+Lighter-1.0.4 correction & {\tt lighter -K 23 100000000 -r SRR065390.fq -t 8} \\
+Musket-1.1 correction & {\tt musket -k 23 200000000 -p 8 -inorder -o out.fq SRR065390.fq} \\
+SGA-0.10.3 correction & \specialcell[t]{\tt sga preprocess -p 2 SRR065390.fq > reads.fq\\\tt sga index -a ropebwt -t 8 --no-reverse reads.fq\\\tt sga correct -t 8 -k 23 --learn reads.fq} \\
+\midrule
+Velvet-1.2.10 assembly & \specialcell[t]{\tt velveth k61 61 -shortPaired -fmtAuto SRR065390.fq\\\tt velvetg k61 -exp\_cov auto -scaffolding yes -cov\_cutoff auto -ins\_length 250} \\
+ABySS-1.5.2 assembly & {\tt abyss-pe name=k67 k=67 in=SRR065390.fq q=0 s=500 n=5} \\
+Fermi2-kit-0.9 assembly & \specialcell[t]{\tt fermi2.pl unitig -Es100m -t16 SRR065390.fq \char62\,SRR065390.mak\\\tt make -f SRR065390.mak} \\
+Bwa-0.7.12 contig mapping & {\tt bwa mem -xintractg -t8 ce235.fa contigs.mag.gz \char62\,contigs.sam} \\
+Aligned N50 and break points & {\tt htsbox abreak -l200 contigs.sam} \\
+FreeBayes-0.9.20 variant calling & {\tt freebayes --experimental-gls -f celegans.fa reads.bam} \\
+Variant calling from contigs & {\tt htsbox pileup -cuf celegans.fa contigs.bam \char62\,contigs.vcf} \\
+Variant filtering & \specialcell[t]{\tt k8 hapdip.js deovlp contigs.vcf \char124\,k8 hapdip.js anno \char62\,contigs.anno\\\tt k8 hapdip.js filter -DF36 -q3 contigs.anno \char62\,contigs.flt} \\
+\botrule
+\end{tabular}}{Command lines for correcting human data are similar except for
+the $k$-mer length and extra options to enable gzip'd input.}
+\end{table*}
+
+\subsection{Assembly-related data processing}
+
+\subsubsection{Velvet assembly}
+The {\it C. elegans} reads have been assembled by~\citet{Simpson:2012aa} and
+independently by~\citet{Song:2014aa}, both using Velvet. The former assembled
+the short reads into scaffolds and then broke them into contigs at assembly
+gaps and derived a contig N50 13.6kb. The latter directly assembled reads into
+contigs and reached an N50 17.3kb. We have tried both settings and could
+approximately reproduce the difference.  We found Velvet produced significantly
+more misassemblies (477 vs 352) when it is not asked to generate scaffolds for
+this data set. We used setting by~\citet{Simpson:2012aa} in Table~2.
+
+\subsubsection{ABySS assembly}
+We initially used the default setting of ABySS, only specifying the $k$-mer length.
+We found the N50 is not as good as the one produced by~\citet{Simpson:2012aa},
+so we adopted their setting. ABySS generate a file with suffix
+`\mbox{-contigs.fa}', but that file still contains long gaps. We finally
+decided to break `-scaffolds.fa' at gaps no short than 5bp. Changing this
+threshold leads to slightly different results, but the relatively ranking of
+correctors is similar.
+
+\subsubsection{FreeBayes SNP calling}
+The latest freebayes-0.9.21 has an issue that causes missing variants in some
+regions. A major change in 0.9.21 is that it uses `--experimental-gls' by
+default. We are using version 0.9.20 with this option applied.
+
+\subsubsection{SNP calling from assembled contigs}
+Fermi2 encodes per-base read depth in the quality string. HTSbox
+(http://bit.ly/HTSBox) is able to call variants using the read depth.
+HTSbox also works with contigs in the FASTA format without per-base read depth.
+It simply lists difference between contigs and the reference given a
+mapping quality threshold.
+
+\subsection{Divergence between SRR065390 and the reference}
+On BWA-MEM short-read mapping, freebayes called 7,047 SNPs before filtering. If
+we exclude SNPs with depth higher than 98 ($=65+4\sqrt{65}$, where 65 is the
+average depth), we are left with 4,251 SNPs. If we apply a similar set of
+filters used in our previous works~\citep{Li:2014aa}, we get 1,658 SNPs, about
+half of which are heterozygotes. We manually checked tens of heterozygous SNPs
+and believed most of them are false calls potentially due to false mappings
+around larger variants. Similarly, we called 3,793 unfiltered and 1,600 filtered
+SNPs from fermikit unitigs and found most post-filtered heterozygotes are
+questionable. Thus we conclude that per-base substitution rate between the
+sequenced sample and the {\it C. elegans} reference genome should be below one
+per 100kb.
+
+We called 8,819 unfiltered SNPs from Velvet contigs and 13,384 from ABySS contigs.
+Without per-base read depth, it is nontrivial to filter them further. In addition
+to SNPs, we also called 655 $>$10bp INDELs from Velvet contigs and 1,393 from
+ABySS contigs. In contrast, we called only 81 $>$10bp INDELs from fermi2 unitigs.
+Upon manual inspection, we suspect many of these Velvet/ABySS SNPs and long
+INDELs are caused by long-range misassemblies or short-range aggressive bubble
+popping.  Velvet and ABySS produce long contigs, but they are not good enough
+for small variant calling. Therefore, we have not evaluated Velvet and ABySS
+SNP calls in Table~2 of the main article.
+
+\subsection{Effect of systematic sequencing errors}
+BFC-ht and BFC-bf use very similar algorithms except that when collecting
+trusted $k$-mers, BFC-ht marks a $k$-mer if it contains low-quality bases. BFC-ht
+uses this information in error correction. This strategy dramatically improves
+SNP accuracy (Table~2) because systematic errors tend to have low base quality.
+Fermi2 is the other corrector that is quality-aware at the $k$-mer counting
+phase and also produces relatively fewer false positive SNPs.
+
+It should be noted that the profile of systematic errors is affected by
+chemistries. This {\it C. elegans} run appears to have high systematic error
+rate at the GGC motif~\citep{Nakamura:2011aa}, but recent Illumina data seem
+to have more errors associated with long ploy-A.
+
+\subsection{Biases in evaluation}
+We have been adjusting the BFC and fermi2 correctors based on older human
+assemblies produced by the fermi2 assembler. Other tools have not received this
+treatment and many of them have not been run on whole-genome human data before.
+Our evaluation is biased towards BFC and fermi2.
+\vspace{1cm}
 \bibliography{bfc}
 \end{document}

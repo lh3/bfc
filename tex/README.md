@@ -1,4 +1,4 @@
-## Data
+## Human Data
 
 Raw reads were downloaded from [BaseSpace][basespace] under the sample
 "NA12878-L7" of project "HiSeq X Ten: TruSeq Nano (4 replicates of NA12878)".
@@ -15,7 +15,7 @@ here][biobin].  We ran all the tools on a CentOS6 machine with 20 cores of
 Intel E5-2660 CPUs at 2.2GHz and 128GB RAM, and measured timing and peak memory
 with GNU time.
 
-## Command Lines
+## Error Correction Command Lines
 
 
 ```sh
@@ -46,6 +46,9 @@ fiona -g 3000000000 --sequencing-technology illumina --no-final-trim-ns -nt 16 r
 # Lighter-20150123
 lighter -K 31 3000000000 -r read1.fq.gz -r read2.fq.gz -t 16
 
+# Musket-1.1
+musket -k 27 3000000000 -p 16 -inorder -o ec.fq read12.fq
+
 # QuorUM-1.0.0
 quorum -s 12000000000 -t 16 -p quorum-k31 -k 31 read1.fq read2.fq
 
@@ -58,6 +61,40 @@ sga correct -t 16 -k 55 --learn out.pe.fq.gz
 echo "read1.fq read2.fq" > list.txt
 trowel -t 16 -f list.txt -k 31 -ntr
 ```
+
+## Assembly-related Command Lines
+
+```sh
+# Velvet-1.2.10 assembly
+velveth k61 61 -shortPaired -fmtAuto -interleaved SRR065390.fq
+velvetg k61 -exp_cov auto -scaffolding yes -cov_cutoff auto -ins_length 250
+
+# ABySS-1.5.2 assembly
+abyss-pe name=k67 k=67 in=SRR065390.fq q=0 s=500 n=5
+
+# Fermikit-0.9 assembly (option -E to skip error correction)
+fermi2.pl unitig -Es100m -t16 SRR065390.fq > SRR065390.mak; make -f SRR065390.mak
+
+# Contig-to-reference mapping (reference version 235)
+bwa mem -x intractg -t 8 celegans.fa contigs.mag.gz > contigs.sam
+
+# Aligned-N50 and break points (htsbox binary included in fermikit-0.9)
+htsbox abreak -l200 contigs.sam
+
+# Variant calling from short reads with freebayes-0.9.20
+freebayes --experimental-gls -f celegans.fa reads.bam
+
+# Variant calling from contigs
+htsbox pileup -cuf celegans.fa contigs.bam > contigs.vcf
+
+# Variant filtering
+k8 hapdip.js deovlp contigs.vcf | k8 hapdip.js anno > contigs.anno
+k8 hapdip.js filter -DF36 -q3 contigs.anno > contigs.flt
+
+# Comparison to freebayes calls (all.bed is a BED including whole genome regions)
+k8 hapdip.js distEval -b all.bed freebayes.raw.vcf contigs.vcf
+```
+
 
 ## Comments
 

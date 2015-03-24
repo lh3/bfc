@@ -454,7 +454,7 @@
   \vspace*{\aboveskipchk}%
   \vspace{\dropfromtop}%
   \hbox to \textwidth{%
-  {\helvetica\itshape\bfseries\fontsize{19}{12}\selectfont {\color{gray}SUPPLYMENTARY INFORMATION}
+  {\helvetica\itshape\bfseries\fontsize{19}{12}\selectfont {\color{gray}SUPPLYMENTARY NOTES}
     \hfil
     \if@appnotes APPLICATIONS NOTE\hfil\fi
     }%
