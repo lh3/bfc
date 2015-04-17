@@ -26,15 +26,25 @@
 \maketitle
 
 \begin{abstract}
-\section{Summary:} We present a new tool to correct sequencing errors in
-Illumina data produced from high-coverage whole-genome shotgun resequencing. It
-uses a non-greedy algorithm and shows comparable performance and higher
-accuracy in evaluations on real data.
+%\section{Summary:} We present a new tool to correct sequencing errors in
+%Illumina data produced from high-coverage whole-genome shotgun resequencing.
+%It uses a non-greedy algorithm and shows comparable performance to other error
+%correctors and higher accuracy in evaluations on real data.
+
+\section{Summary:} BFC is a free, fast and easy-to-use sequencing error
+corrector designed for Illumina short reads. It uses a non-greedy algorithm
+but still maintains a speed comparable to implementations based on greedy
+methods. In evaluations on real data, BFC appears to correct more errors with
+fewer overcorrections in comparison to existing tools. It particularly does
+well in suppressing systematic sequencing errors, which helps to improve the
+base accuracy of {\it de novo} assemblies.
 
 \section{Availability and implementation:} https://github.com/lh3/bfc
 
 \section{Contact:} hengli@broadinstitute.org
 \end{abstract}
+
+\vspace{-1em}
 
 \section{Introduction}
 
@@ -47,12 +57,13 @@ as the \emph{spectral alignment problem}~\citep{Pevzner:2001vn}, whereby we take
 a set of trusted $k$-mers and attempt to find a sequence with minimal
 corrections such that each $k$-mer on the corrected sequence is trusted.
 The majority of error correctors are based on this idea and take a greedy
-approach to solving this problem.  They make a correction based on the local
-sequence context and do not revert the decision. They may not find the sequence
-with the minimal corrections. We worried that the greedy strategy might affect
-the accuracy given reads from a repeat-rich diploid genome, so derived a new
-algorithm. It is able to find the sequence with minimal corrections provided
-that we know there is an error-free $k$-mer in the read.
+approach to solving this problem approximately. They make a correction based on
+the local sequence context and do not revert the decision. We worried that the
+greedy strategy might affect the accuracy given reads from a repeat-rich
+diploid genome, so derived a new non-greedy algorithm that explores larger
+search space in attempt to achieve higher accuracy.
+
+\vspace{-1em}
 
 \begin{methods}
 \section{Methods}
@@ -153,7 +164,7 @@ fermi2-r175~\citep{Li:2012fk}, Lighter-20150123~\citep{Song:2014aa},
 Musket-1.1~\citep{Liu:2013ac} and SGA-0.9.13~\citep{Simpson:2012aa}.
 We ran the tools on a Linux server with 20 cores of Intel
 E5-2660 CPUs and 128GB RAM. Precompiled binaries are available through
-http://bit.ly/biobin and the command lines were shown in Table~S1.
+http://bit.ly/biobin and the command lines were shown in Table~S2.
 Notably, BLESS only works with uncompressed files. Other tools were
 provided with gzip'd FASTQ.
 %The rest of tools were provided with gzip'd files as input.
@@ -225,7 +236,7 @@ SGA       & 34.4 / 33.4 & 16.7 / 22.4 / 6.6 & 360 / 163 / 32 & 3107 / 495\\
 downloaded from SRA under accession SRR065390, corrected using $k$-mer length
 23 and then assembled with Velvet-1.2.10~(\citealp{Zerbino:2008uq}; velvetg
 option `\mbox{-exp\_cov} auto \mbox{-cov\_cutoff} auto \mbox{-ins\_length} 250'
-with $k$-mer length 61), ABySS-1.5.2~[\citealp{Simpson:2009ys}; abyess-pe
+with $k$-mer length 61), ABySS-1.5.2~[\citealp{Simpson:2009ys}; abyss-pe
 option `k=67 q=0 s=500 n=5' taken from~\citet{Simpson:2012aa}] and fermikit-0.9
 (fermi2.pl option \mbox{`-Es100m'}). For Velvet and ABySS, contigs were derived
 by splitting scaffolds at contiguous `N' bases longer than 5bp. In the table,
@@ -235,7 +246,7 @@ contig alignment break points with $>$200bp flanking sequences and the number
 of false positive unfiltered/filtered fermikit SNPs as compared to
 freebayes-0.9.20 calls~(\citealp{Garrison:2012aa}; option
 `\mbox{--experimental-gls}'). BFC and fermi2 were tuned to work with fermikit
-for human variant calling before this evaluation while others not.}
+for human variant calling before this evaluation while others were not.}
 \end{table}
 
 On human data (Table~1), BFC has similar performance to other error correctors

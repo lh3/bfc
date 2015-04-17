@@ -31,11 +31,10 @@ tried AllPaths-LG~\citep{Gnerre:2011ys}, Fiona~\citep{Schulz:2014aa} and
 Trowel~\citep{Lim:2014aa}, but they require more than 128GB RAM our machine
 has, so were not evaluated. According to \citet{Molnar:2014aa},
 RACER~\citep{Ilie:2013aa} uses 1.38--2.36 bytes per input base for
-high-coverage human data. It would also use too much memory.  In the Blue
-paper~\citep{Greenfield:2014aa}, Blue uses 2.6GB RAM for chr21 data, less than
-2\% of the human genome. At this rate, 128GB RAM would not be sufficient,
-either. We have also considered, QuorUM~\citep{Zimin:2013aa}.  However,
-it always trims reads, making it hard to be compared to others which keep
+high-coverage human data. It would also use too much memory. We considered
+Blue~\citep{Greenfield:2014aa}, but its website is down at the time of the
+evaluation. We have also tried QuorUM~\citep{Zimin:2013aa}.  However, it
+always trims reads, making it hard to be compared to others which keep
 full-length reads.
 
 \subsection{Mapping-based metrics}
@@ -62,7 +61,29 @@ procedure.
 We have tried 23-mer and 27-mer for error correction. The N50 of assembled
 scaffolds and contigs are mostly within a few hundred bp with 23-mer
 slightly better. The rest of assembly based metrics were all calculated
-for the correction with 23-mers. Detailed command lines are shown in Table~S1.
+for the correction with 23-mers. Table~S1 evaluates the accuracy with
+mapping-based metrics. The relative performance of tools is similar to that in
+Table~1.
+
+\begin{table}[t]
+\processtable{Error correction for 67.6M {\it C. elegans} reads}
+{\footnotesize
+\begin{tabular}{p{2cm}p{1.35cm}p{1.35cm}p{1.35cm}r}
+\toprule
+Prog.     & Perfect&Chim.& Better & Worse \\
+\midrule
+raw data  & 47.6M  & 398k  & --     & --   \\
+BFC-bf    & 57.9M  & 402k  & 11.3M  & 117k \\
+BFC-ht    &{\bf 58.3M}  & 410k  & 12.1M  & {\bf 92k}  \\
+BLESS     & 57.3M  & {\bf 393k}  & 11.0M  & 137k \\
+Bloocoo   & 55.3M  & 417k  & 10.2M  & 255k \\
+Fermi2    & 58.1M  & 431k  & {\bf 13.2M}  & 287k \\
+Lighter   & 58.0M  & 400k  & 11.3M  & 171k \\
+Musket    & 57.4M  & 448k  & 11.8M  & 246k \\
+SGA       & 57.3M  & 418k  & 10.7M  & 201k \\
+\botrule
+\end{tabular}}{}
+\end{table}
 
 \begin{table*}[t]
 \processtable{Command lines used for assembly evaluation}
@@ -99,8 +120,8 @@ the $k$-mer length and extra options to enable gzip'd input.}
 The {\it C. elegans} reads have been assembled by~\citet{Simpson:2012aa} and
 independently by~\citet{Song:2014aa}, both using Velvet. The former assembled
 the short reads into scaffolds and then broke them into contigs at assembly
-gaps and derived a contig N50 13.6kb. The latter directly assembled reads into
-contigs and reached an N50 17.3kb. We have tried both settings and could
+gaps and derived a contig N50 of 13.6kb. The latter directly assembled reads into
+contigs and reached an N50 of 17.3kb. We have tried both settings and could
 approximately reproduce the difference.  We found Velvet produced significantly
 more misassemblies (477 vs 352) when it is not asked to generate scaffolds for
 this data set. We used setting by~\citet{Simpson:2012aa} in Table~2.
@@ -157,6 +178,14 @@ SNP accuracy (Table~2) because systematic errors tend to have low base quality.
 Fermi2 is the other corrector that is quality-aware at the $k$-mer counting
 phase and also produces relatively fewer false positive SNPs.
 
+We think the fewer number of false positive SNPs called from raw data are also
+related to systematic errors. In Illumina sequencing, when there are systematic
+errors, flanking regions nearby tend to be enriched with sequencing errors as
+well, which makes the assembler harder to assemble through such regions.
+Because there are no unitigs covering these regions, we don't call systematic
+errors as false positives. However, not using error correction in this case
+clearly leads to inferior N50 and probably also lead to reduced sensitivity.
+
 It should be noted that the profile of systematic errors is affected by
 chemistries. This {\it C. elegans} run appears to have high systematic error
 rate at the GGC motif~\citep{Nakamura:2011aa}, but recent Illumina data seem
@@ -167,6 +196,14 @@ We have been adjusting the BFC and fermi2 correctors based on older human
 assemblies produced by the fermi2 assembler. Other tools have not received this
 treatment and many of them have not been run on whole-genome human data before.
 Our evaluation is biased towards BFC and fermi2.
-\vspace{1cm}
+
+%\subsection{Concluding remarks}
+%BFC is a free, fast and easy-to-use error corrector designed for Illumina short
+%reads. It uses a more exhausive algorithm but still maintains a speed
+%comparable to implementations based on greedy methods. In practice, BFC appears
+%to correct more errors with fewer overcorrections in comparison to others. It
+%particularly does well in suppressing systematic sequencing errors, which helps
+%to improve the base accuracy of {\it de novo} assemblies.
+
 \bibliography{bfc}
 \end{document}
