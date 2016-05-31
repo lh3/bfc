@@ -598,14 +598,14 @@ void *bfc_ec_cb(void *shared, int step, void *_data)
 				if (es->opt->discard && (s->aux&7)) goto bfc_ec_cb_free;
 				printf("%c%s", is_fq? '@' : '>', s->name);
 				if (!s->comment) {
-					printf("\tec:Z:%d", s->aux&7);
+					printf(" ec:Z:%d", s->aux&7);
 					if ((s->aux&7) == 0)
 						printf("_%d:%d_%d_%d:%d_%d", s->aux2>>10, s->aux2&0xff, s->aux>>3&1, s->aux>>18&0x3fff, s->aux>>4&0x3fff, s->aux2>>8&3);
-				} else printf("\t%s", s->comment);
+				} else printf(" %s", s->comment);
 			} else {
 				if (s->aux) goto bfc_ec_cb_free;
 				printf("%c%s", is_fq? '@' : '>', s->name);
-				if (s->comment) printf("\t%s", s->comment);
+				if (s->comment) printf(" %s", s->comment);
 			}
 			putchar('\n'); puts(s->seq);
 			if (is_fq) { puts("+"); puts(s->qual); }
